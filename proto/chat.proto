@@ -1,0 +1,22 @@
+syntax = "proto3";
+package remote_work;
+
+// Chat messages over WebRTC data channel
+message ChatMessage {
+  string id = 1;
+  string sender = 2;     // "host" or "viewer"
+  string content = 3;
+  uint64 timestamp_ms = 4;
+}
+
+message ChatEnvelope {
+  oneof payload {
+    ChatMessage message = 1;
+    TypingIndicator typing = 2;
+  }
+}
+
+message TypingIndicator {
+  string sender = 1;
+  bool is_typing = 2;
+}

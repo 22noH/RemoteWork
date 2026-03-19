@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(cd /c/Users/User/Desktop/Src/Remote_Work/signaling-server && cargo check 2>&1)",
+      "Bash(export PATH=\"$HOME/.cargo/bin:$PATH\" && cd /c/Users/User/Desktop/Src/Remote_Work/signaling-server && cargo check 2>&1)",
+      "Bash(cmd.exe:*)",
+      "Bash(head:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+syntax = "proto3";
+package remote_work;
+
+// Input events sent over WebRTC data channel from viewer to host
+message InputEvent {
+  oneof event {
+    MouseMove mouse_move = 1;
+    MouseButton mouse_button = 2;
+    MouseScroll mouse_scroll = 3;
+    KeyEvent key_event = 4;
+  }
+}
+
+message MouseMove {
+  // Normalized coordinates [0.0, 1.0] relative to remote screen
+  float x = 1;
+  float y = 2;
+}
+
+message MouseButton {
+  enum Button {
+    LEFT = 0;
+    RIGHT = 1;
+    MIDDLE = 2;
+  }
+  Button button = 1;
+  bool pressed = 2;
+  float x = 3;
+  float y = 4;
+}
+
+message MouseScroll {
+  float delta_x = 1;
+  float delta_y = 2;
+}
+
+message KeyEvent {
+  uint32 key_code = 1;   // USB HID key code
+  bool pressed = 2;
+  uint32 modifiers = 3;  // Bitmask: CTRL=1, SHIFT=2, ALT=4, META=8
+}

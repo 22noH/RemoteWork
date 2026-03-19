@@ -1,0 +1,12 @@
+[package]
+name = "capture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+xcap = "0.0.14"
+vpx-encode = "0.4"

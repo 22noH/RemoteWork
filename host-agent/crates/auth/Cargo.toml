@@ -1,0 +1,9 @@
+[package]
+name = "auth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = { workspace = true }
+argon2 = "0.5"
+anyhow = { workspace = true }

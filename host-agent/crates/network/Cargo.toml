@@ -1,0 +1,21 @@
+[package]
+name = "network"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+tungstenite = "0.21"
+futures-util = "0.3"
+url = "2"
+webrtc = { workspace = true }
+proto = { path = "../proto" }
+auth = { path = "../auth" }

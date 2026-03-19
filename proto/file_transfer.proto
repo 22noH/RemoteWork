@@ -1,0 +1,53 @@
+syntax = "proto3";
+package remote_work;
+
+// File transfer protocol over WebRTC data channel
+message FileTransferMessage {
+  oneof payload {
+    FileTransferRequest request = 1;
+    FileTransferAccept accept = 2;
+    FileTransferReject reject = 3;
+    FileChunk chunk = 4;
+    FileTransferComplete complete = 5;
+    FileTransferError error = 6;
+    FileTransferCancel cancel = 7;
+  }
+}
+
+message FileTransferRequest {
+  string transfer_id = 1;
+  string file_name = 2;
+  uint64 file_size = 3;
+  string sha256_hash = 4;
+  string destination_path = 5;
+}
+
+message FileTransferAccept {
+  string transfer_id = 1;
+}
+
+message FileTransferReject {
+  string transfer_id = 1;
+  string reason = 2;
+}
+
+message FileChunk {
+  string transfer_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+  bool last_chunk = 4;
+}
+
+message FileTransferComplete {
+  string transfer_id = 1;
+  string sha256_hash = 2;
+}
+
+message FileTransferError {
+  string transfer_id = 1;
+  string error = 2;
+}
+
+message FileTransferCancel {
+  string transfer_id = 1;
+}

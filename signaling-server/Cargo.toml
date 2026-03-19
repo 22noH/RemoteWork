@@ -1,0 +1,32 @@
+[package]
+name = "signaling-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "signaling-server"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+tungstenite = { version = "0.21" }
+futures-util = "0.3"
+prost = "0.12"
+dashmap = "5"
+uuid = { version = "1", features = ["v4"] }
+argon2 = "0.5"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "1"
+bytes = "1"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+clap = { version = "4", features = ["derive", "env"] }
+
+[build-dependencies]
+prost-build = "0.12"
