@@ -77,6 +77,7 @@ impl SessionRegistry {
 
     pub fn remove_host(&self, host_id: &str) {
         self.hosts.remove(host_id);
+        self.sessions.retain(|_, s| s.host_id != host_id);
     }
 
     pub fn remove_viewer(&self, viewer_session_id: &str) {

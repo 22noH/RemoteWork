@@ -86,6 +86,8 @@ async fn run_reconnect_loop(
                 let mut shutdown = shutdown_tx.subscribe();
                 let mut ping_interval = interval(Duration::from_secs(30));
                 ping_interval.tick().await; // consume the immediate first tick
+                let mut health_interval = interval(Duration::from_secs(30));
+                health_interval.tick().await;
 
                 loop {
                     tokio::select! {
@@ -96,6 +98,39 @@ async fn run_reconnect_loop(
                         }
                         _ = ping_interval.tick() => {
                             client.send_ping(now_ms());
+                        }
+                        _ = health_interval.tick() => {
+                            let mut dead_tokens: Vec<String> = Vec::new();
+                            let now = std::time::Instant::now();
+                            for (token, session) in sessions.iter() {
+                                let state = session.pc.connection_state();
+                                match state {
+                                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Failed
+                                    | webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Closed => {
+                                        tracing::info!("Cleaning up dead session {} (state: {})", token, state);
+                                        dead_tokens.push(token.clone());
+                                    }
+                                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected => {
+                                        if now.duration_since(session.created_at) > std::time::Duration::from_secs(60) {
+                                            tracing::info!("Cleaning up disconnected session {} (>60s)", token);
+                                            dead_tokens.push(token.clone());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            for token in dead_tokens {
+                                if let Some(session) = sessions.remove(&token) {
+                                    let _ = session.capture_stop_tx.send(());
+                                    if let Some(stop) = session.audio_capture_stop {
+                                        let _ = stop.send(());
+                                    }
+                                    if let Some(stop) = session.audio_playback_stop {
+                                        let _ = stop.send(());
+                                    }
+                                    let _ = session.pc.close().await;
+                                }
+                            }
                         }
                         event = event_rx.recv() => {
                             match event {
@@ -162,6 +197,7 @@ struct Session {
     file_reply_tx: mpsc::UnboundedSender<Vec<u8>>,
     audio_capture_stop: Option<tokio::sync::oneshot::Sender<()>>,
     audio_playback_stop: Option<tokio::sync::oneshot::Sender<()>>,
+    created_at: std::time::Instant,
 }
 
 async fn handle_event(
@@ -315,6 +351,7 @@ async fn handle_event(
                     file_reply_tx,
                     audio_capture_stop,
                     audio_playback_stop,
+                    created_at: std::time::Instant::now(),
                 },
             );
         }

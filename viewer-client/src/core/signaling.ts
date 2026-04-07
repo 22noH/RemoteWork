@@ -75,6 +75,7 @@ export class SignalingClient {
             })
           }, delay)
         } else {
+          useConnectionStore.getState().setDisconnectReason('network')
           useConnectionStore.getState().setConnectionState('disconnected')
         }
       }

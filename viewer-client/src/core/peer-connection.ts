@@ -47,6 +47,7 @@ export class RemotePeerConnection {
           useConnectionStore.getState().setConnectionState('connected')
           break
         case 'disconnected':
+          useConnectionStore.getState().setConnectionState('reconnecting')
           // Wait 5s then attempt ICE restart
           setTimeout(() => {
             if (this.pc.connectionState === 'disconnected') {
@@ -61,6 +62,7 @@ export class RemotePeerConnection {
             setTimeout(() => {
               if (this.pc.connectionState === 'failed') {
                 this.close()
+                useConnectionStore.getState().setDisconnectReason('timeout')
                 useConnectionStore.getState().setConnectionState('disconnected')
               }
             }, 5000)

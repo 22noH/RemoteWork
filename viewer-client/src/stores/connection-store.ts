@@ -9,6 +9,8 @@ export type ConnectionState =
   | 'reconnecting'
   | 'error'
 
+export type DisconnectReason = 'timeout' | 'host_closed' | 'network' | 'user' | null
+
 interface ConnectionStore {
   isConnected: boolean
   connectionState: ConnectionState
@@ -18,16 +20,13 @@ interface ConnectionStore {
   signalingWs: WebSocket | null
   peerConnection: RTCPeerConnection | null
   remoteStream: MediaStream | null
-  /** Sends input event bytes over the WebRTC input data channel */
   sendInput: ((data: ArrayBuffer) => void) | null
-  /** Sends a chat message string (ChatManager handles encoding) */
   sendMessage: ((content: string) => void) | null
-  /** Sends a file via FileTransferManager */
   sendFile: ((file: File) => void) | null
-  /** Whether the local microphone is muted */
   isMuted: boolean
-  /** Local audio track from getUserMedia */
   localAudioTrack: MediaStreamTrack | null
+  reconnectingSince: number | null
+  disconnectReason: DisconnectReason
 
   setConnectionState: (state: ConnectionState) => void
   setSessionToken: (token: string) => void
@@ -41,6 +40,7 @@ interface ConnectionStore {
   setSendFile: (fn: ((file: File) => void) | null) => void
   setMuted: (muted: boolean) => void
   setLocalAudioTrack: (track: MediaStreamTrack | null) => void
+  setDisconnectReason: (reason: DisconnectReason) => void
   disconnect: () => void
 }
 
@@ -58,9 +58,20 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
   sendFile: null,
   isMuted: false,
   localAudioTrack: null,
+  reconnectingSince: null,
+  disconnectReason: null,
 
   setConnectionState: (state) =>
-    set({ connectionState: state, isConnected: state === 'connected' }),
+    set((prev) => ({
+      connectionState: state,
+      isConnected: state === 'connected',
+      reconnectingSince:
+        state === 'reconnecting'
+          ? (prev.reconnectingSince ?? Date.now())
+          : state === 'connected'
+          ? null
+          : prev.reconnectingSince,
+    })),
   setSessionToken: (token) => set({ sessionToken: token }),
   setHostId: (id) => set({ hostId: id }),
   setError: (error) => set({ error }),
@@ -72,6 +83,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
   setSendFile: (fn) => set({ sendFile: fn }),
   setMuted: (muted) => set({ isMuted: muted }),
   setLocalAudioTrack: (track) => set({ localAudioTrack: track }),
+  setDisconnectReason: (reason) => set({ disconnectReason: reason }),
 
   disconnect: () => {
     const { signalingWs, peerConnection, localAudioTrack } = get()
@@ -90,6 +102,8 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
       sendFile: null,
       isMuted: false,
       localAudioTrack: null,
+      reconnectingSince: null,
+      disconnectReason: 'user',
     })
   },
 }))

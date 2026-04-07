@@ -304,6 +304,10 @@ impl HostPeerConnection {
         Arc::clone(&self.audio_track)
     }
 
+    pub fn connection_state(&self) -> RTCPeerConnectionState {
+        self.pc.connection_state()
+    }
+
     pub async fn close(&self) -> Result<()> {
         self.pc.close().await?;
         Ok(())

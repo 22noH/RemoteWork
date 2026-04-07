@@ -9,14 +9,16 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "electron:dev": "electron-vite dev",
-    "electron:build": "electron-vite build && electron-builder"
+    "electron:build": "electron-vite build && electron-builder",
+    "generate-icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "zustand": "^4.4.7",
     "protobufjs": "^7.2.5",
-    "clsx": "^2.0.0"
+    "clsx": "^2.0.0",
+    "electron-updater": "^6.1.7"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
@@ -29,7 +31,9 @@
     "electron-vite": "^2.0.0",
     "tailwindcss": "^3.4.0",
     "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.32"
+    "postcss": "^8.4.32",
+    "sharp": "^0.33.2",
+    "png2icons": "^2.0.1"
   },
   "build": {
     "extends": "./electron-builder.yml"
