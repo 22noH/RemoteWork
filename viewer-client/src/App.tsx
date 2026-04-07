@@ -7,9 +7,11 @@ import FileTransfer from './components/FileTransfer'
 import UpdateBanner from './components/UpdateBanner'
 import SessionStatusOverlay from './components/SessionStatusOverlay'
 import { useConnectionStore } from './stores/connection-store'
+import { useIdleTimeout } from './hooks/useIdleTimeout'
 
 function App() {
   const { isConnected, connectionState } = useConnectionStore()
+  useIdleTimeout()
   const [showChat, setShowChat] = useState(false)
   const [showFiles, setShowFiles] = useState(false)
 

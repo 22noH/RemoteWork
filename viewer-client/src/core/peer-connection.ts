@@ -170,6 +170,7 @@ export class RemotePeerConnection {
   sendInput(data: ArrayBuffer): void {
     if (this.inputChannel?.readyState === 'open') {
       this.inputChannel.send(data)
+      useConnectionStore.getState().updateLastInput()
     }
   }
 

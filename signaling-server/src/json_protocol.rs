@@ -122,6 +122,20 @@ pub fn to_ws_message(msg: JsonMessage) -> Message {
     Message::Text(text)
 }
 
+/// `{"type":"session_timeout_warning","payload":{"seconds_remaining":30}}`
+pub fn json_session_timeout_warning(seconds_remaining: u64) -> String {
+    build("session_timeout_warning", serde_json::json!({
+        "seconds_remaining": seconds_remaining,
+    }))
+}
+
+/// `{"type":"session_expired","payload":{"reason":"idle_timeout"}}`
+pub fn json_session_expired() -> String {
+    build("session_expired", serde_json::json!({
+        "reason": "idle_timeout",
+    }))
+}
+
 /// Convert a pre-built JSON string directly into a WebSocket text frame.
 pub fn str_to_ws_message(json: String) -> Message {
     Message::Text(json)

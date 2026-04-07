@@ -142,97 +142,144 @@ async fn handle_ws_stream<S>(
     });
 
     // -----------------------------------------------------------------------
-    // Receive loop with idle timeout (5 minutes)
+    // Receive loop with idle timeout (5 minutes) and 30-second warning
     // -----------------------------------------------------------------------
     let idle_timeout = Duration::from_secs(300);
+    let warning_before = Duration::from_secs(30);
+    let mut idle_start = tokio::time::Instant::now();
+    let mut warning_sent = false;
+
+    enum LoopEvent {
+        Message(Result<Message, tokio_tungstenite::tungstenite::Error>),
+        Timer,
+    }
+
     loop {
-        let msg = tokio::select! {
-            msg = ws_receiver.next() => {
-                match msg {
-                    Some(msg) => msg,
-                    None => break,
+        let elapsed = idle_start.elapsed();
+        let remaining = idle_timeout.saturating_sub(elapsed);
+
+        if remaining.is_zero() {
+            tracing::info!("Idle timeout for {}, disconnecting", peer_addr);
+            if use_json.load(Ordering::Relaxed) {
+                let _ = tx.send(json_protocol::json_session_expired().into_bytes());
+            }
+            break;
+        }
+
+        // Sleep until the next interesting event: warning threshold or expiry.
+        let next_sleep = if !warning_sent && remaining > warning_before {
+            remaining - warning_before
+        } else {
+            remaining
+        };
+
+        let event = tokio::select! {
+            msg = ws_receiver.next() => match msg {
+                Some(m) => LoopEvent::Message(m),
+                None => break,
+            },
+            _ = tokio::time::sleep(next_sleep) => LoopEvent::Timer,
+        };
+
+        match event {
+            LoopEvent::Timer => {
+                let since = idle_start.elapsed();
+                if since >= idle_timeout {
+                    tracing::info!("Idle timeout for {}, disconnecting", peer_addr);
+                    if use_json.load(Ordering::Relaxed) {
+                        let _ = tx.send(json_protocol::json_session_expired().into_bytes());
+                    }
+                    break;
+                } else if !warning_sent {
+                    let secs_left = idle_timeout.saturating_sub(since).as_secs();
+                    tracing::debug!("Idle warning for {}: {}s remaining", peer_addr, secs_left);
+                    if use_json.load(Ordering::Relaxed) {
+                        let _ = tx.send(json_protocol::json_session_timeout_warning(secs_left).into_bytes());
+                    }
+                    warning_sent = true;
                 }
+                continue;
             }
-            _ = tokio::time::sleep(idle_timeout) => {
-                tracing::info!("Idle timeout ({}s) for {}, disconnecting", idle_timeout.as_secs(), peer_addr);
-                break;
-            }
-        };
 
-        let msg = match msg {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::debug!("WebSocket error from {}: {}", peer_addr, e);
-                break;
-            }
-        };
+            LoopEvent::Message(res) => {
+                // Any message resets the idle clock.
+                idle_start = tokio::time::Instant::now();
+                warning_sent = false;
 
-        match msg {
-            // ------------------------------------------------------------------
-            // JSON text frame — TypeScript viewer client
-            // ------------------------------------------------------------------
-            Message::Text(text) => {
-                // Latch this connection as a JSON client.
-                use_json.store(true, Ordering::Relaxed);
-
-                let json_msg = match json_protocol::parse_json_message(&text) {
+                let msg = match res {
                     Ok(m) => m,
                     Err(e) => {
-                        tracing::warn!("Invalid JSON from {}: {}", peer_addr, e);
-                        let err = json_protocol::json_error(
-                            "PARSE_ERROR".to_string(),
-                            format!("Invalid JSON: {}", e),
-                        );
-                        let _ = tx.send(err.into_bytes());
-                        continue;
+                        tracing::debug!("WebSocket error from {}: {}", peer_addr, e);
+                        break;
                     }
                 };
 
-                handle_json_message(
-                    json_msg,
-                    &tx,
-                    &registry,
-                    &mut this_host_id,
-                    &mut this_viewer_id,
-                    &peer_addr,
-                )
-                .await;
-            }
+                match msg {
+                    // ------------------------------------------------------------------
+                    // JSON text frame — TypeScript viewer client
+                    // ------------------------------------------------------------------
+                    Message::Text(text) => {
+                        use_json.store(true, Ordering::Relaxed);
 
-            // ------------------------------------------------------------------
-            // Binary frame — Rust host agent (Protobuf)
-            // ------------------------------------------------------------------
-            Message::Binary(data) => {
-                // Protobuf clients are the default; use_json stays false.
-                let envelope = match Envelope::decode(data.as_slice()) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to decode Protobuf envelope from {}: {}", peer_addr, e);
-                        continue;
+                        let json_msg = match json_protocol::parse_json_message(&text) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                tracing::warn!("Invalid JSON from {}: {}", peer_addr, e);
+                                let err = json_protocol::json_error(
+                                    "PARSE_ERROR".to_string(),
+                                    format!("Invalid JSON: {}", e),
+                                );
+                                let _ = tx.send(err.into_bytes());
+                                continue;
+                            }
+                        };
+
+                        handle_json_message(
+                            json_msg,
+                            &tx,
+                            &registry,
+                            &mut this_host_id,
+                            &mut this_viewer_id,
+                            &peer_addr,
+                        )
+                        .await;
                     }
-                };
 
-                let payload = match envelope.payload {
-                    Some(p) => p,
-                    None => continue,
-                };
+                    // ------------------------------------------------------------------
+                    // Binary frame — Rust host agent (Protobuf)
+                    // ------------------------------------------------------------------
+                    Message::Binary(data) => {
+                        let envelope = match Envelope::decode(data.as_slice()) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                tracing::warn!("Failed to decode Protobuf envelope from {}: {}", peer_addr, e);
+                                continue;
+                            }
+                        };
 
-                handle_proto_payload(
-                    payload,
-                    &tx,
-                    &registry,
-                    &mut this_host_id,
-                    &mut this_viewer_id,
-                    &peer_addr,
-                )
-                .await;
+                        let payload = match envelope.payload {
+                            Some(p) => p,
+                            None => continue,
+                        };
+
+                        handle_proto_payload(
+                            payload,
+                            &tx,
+                            &registry,
+                            &mut this_host_id,
+                            &mut this_viewer_id,
+                            &peer_addr,
+                        )
+                        .await;
+                    }
+
+                    Message::Close(_) => break,
+                    Message::Ping(payload) => {
+                        tracing::trace!("WebSocket Ping from {} ({} bytes)", peer_addr, payload.len());
+                    }
+                    _ => {}
+                }
             }
-
-            Message::Close(_) => break,
-            Message::Ping(payload) => {
-                tracing::trace!("WebSocket Ping from {} ({} bytes)", peer_addr, payload.len());
-            }
-            _ => {}
         }
     }
 

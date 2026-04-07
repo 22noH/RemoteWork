@@ -16,6 +16,8 @@ export interface SignalingMessage {
     | 'error'
     | 'ping'
     | 'pong'
+    | 'session_timeout_warning'
+    | 'session_expired'
   payload: Record<string, unknown>
 }
 
@@ -134,6 +136,18 @@ export class SignalingClient {
         const p = msg.payload as { message: string }
         console.error('[Signaling] Server error:', p.message)
         useConnectionStore.getState().setError(p.message)
+        break
+      }
+      case 'session_timeout_warning': {
+        const p = msg.payload as { seconds_remaining: number }
+        console.warn('[Signaling] Session timeout warning:', p.seconds_remaining, 's remaining')
+        useConnectionStore.getState().setIdleWarning(true)
+        break
+      }
+      case 'session_expired': {
+        console.warn('[Signaling] Session expired by server (idle timeout)')
+        this.shouldReconnect = false
+        useConnectionStore.getState().setDisconnectReason('idle_timeout')
         break
       }
     }
