@@ -1,0 +1,13 @@
+{"ts":"2026-03-19T12:16:35.567Z","sessionId":"ses-ceo-1773922588227","roleId":"ceo","model":"claude-opus-4-6","inputTokens":17274,"outputTokens":49}
+{"ts":"2026-03-19T12:18:34.070Z","sessionId":"chat-general","roleId":"po","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:18:47.924Z","sessionId":"chat-general","roleId":"be-engineer","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:19:11.224Z","sessionId":"chat-watercooler","roleId":"po","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:19:24.167Z","sessionId":"chat-general","roleId":"cto","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:19:45.796Z","sessionId":"chat-watercooler","roleId":"designer","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:20:01.684Z","sessionId":"chat-watercooler","roleId":"qa","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:20:18.450Z","sessionId":"chat-general","roleId":"be-engineer","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:20:35.171Z","sessionId":"chat-general","roleId":"be-engineer","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:20:54.700Z","sessionId":"chat-general","roleId":"cbo","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:21:12.884Z","sessionId":"chat-general","roleId":"fe-engineer","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:21:35.042Z","sessionId":"chat-general","roleId":"po","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}
+{"ts":"2026-03-19T12:21:53.874Z","sessionId":"chat-watercooler","roleId":"fe-engineer","model":"claude-haiku-4-5-20251001","inputTokens":0,"outputTokens":0}

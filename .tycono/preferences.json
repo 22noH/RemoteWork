@@ -72,6 +72,12 @@
       "accessory": "badge"
     }
   },
-  "theme": "default",
-  "language": "en"
+  "theme": "light",
+  "language": "en",
+  "furnitureOverrides": {
+    "exec-picture-1": {
+      "offsetX": 34,
+      "offsetY": 8
+    }
+  }
 }
