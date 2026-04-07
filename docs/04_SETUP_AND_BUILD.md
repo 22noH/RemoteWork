@@ -137,6 +137,9 @@ cd C:\vcpkg
 # OpenSSL 설치 (webrtc-rs 의존성)
 .\vcpkg install openssl:x64-windows
 
+# libopus 설치 (오디오 크레이트 의존성)
+.\vcpkg install opus:x64-windows
+
 # 전역 통합 (Visual Studio / MSBuild가 자동으로 찾도록)
 .\vcpkg integrate install
 ```
@@ -173,6 +176,7 @@ sudo apt install -y \
     protobuf-compiler \
     libvpx-dev \
     libssl-dev \
+    libopus-dev \
     libx11-dev \
     libxext-dev \
     libxcb1-dev \
@@ -185,6 +189,7 @@ sudo apt install -y \
 |--------|------|
 | `libvpx-dev` | `vpx-encode` 크레이트 (VP8 인코딩) |
 | `libssl-dev` | `webrtc-rs` 크레이트 |
+| `libopus-dev` | `audio` 크레이트 (Opus 인코딩/디코딩) |
 | `libx11-dev`, `libxext-dev` | `xcap` 크레이트 (X11 화면 캡처) |
 | `libxcb*` | `xcap` Wayland/XCB 지원 |
 | `libdbus-1-dev` | 시스템 트레이 (Phase 4) |
@@ -196,7 +201,7 @@ sudo apt install -y \
 ### macOS
 
 ```bash
-brew install libvpx openssl pkg-config
+brew install libvpx openssl opus pkg-config
 
 # OpenSSL 경로 환경 변수 (Apple Silicon / Intel 모두)
 export OPENSSL_DIR=$(brew --prefix openssl)
@@ -365,6 +370,9 @@ LISTEN_ADDR=0.0.0.0:9000 RUST_LOG=info ./signaling-server
 |------|--------|------|
 | `SIGNALING_URL` | `ws://localhost:8080` | 시그널링 서버 URL |
 | `RUST_LOG` | (없음) | 로그 레벨 |
+| `TURN_URL` | (없음) | TURN 서버 URL (coturn) |
+| `TURN_USERNAME` | (없음) | TURN 사용자명 |
+| `TURN_CREDENTIAL` | (없음) | TURN 비밀번호 |
 
 예시 (원격 서버 연결):
 ```bash
@@ -497,4 +505,8 @@ macOS 12 이상에서 화면 캡처 권한이 필요하다.
 □ 시그널링 서버 기동 확인 (포트 8080)
 □ 호스트 에이전트 실행 → host_id / password 확인
 □ 뷰어 접속 → ID + 비밀번호 입력 → 연결 성공
+
+Electron 패키지 빌드 (선택):
+□ cd viewer-client && npm run electron:build
+  (아이콘: resources/icon.ico, icon.icns, icon.png 필요)
 ```

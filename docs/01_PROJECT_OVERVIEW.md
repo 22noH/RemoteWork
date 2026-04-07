@@ -27,7 +27,7 @@ Remote_Work/
 │       ├── ws_server.rs          # 듀얼 프로토콜 핸들러 (JSON + Protobuf)
 │       ├── json_protocol.rs      # JSON serde 헬퍼
 │       ├── session_registry.rs   # Host/Viewer/Session 관리 (DashMap)
-│       ├── auth.rs               # 비밀번호 검증 (현재 == 비교, Phase 5에서 Argon2id)
+│       ├── auth.rs               # Argon2id 비밀번호 검증
 │       └── relay.rs              # SDP/ICE 릴레이
 │
 ├── host-agent/                   # Rust 호스트 에이전트 (Cargo workspace)
@@ -35,16 +35,20 @@ Remote_Work/
 │   │   ├── main.rs               # 진입점, tracing 초기화
 │   │   ├── app.rs                # 이벤트 루프, 세션 관리, 캡처 파이프라인
 │   │   ├── config.rs             # JSON 설정 파일 (host_id, password, stun)
-│   │   └── tray.rs               # 시스템 트레이 (Phase 4)
+│   │   └── tray.rs               # 시스템 트레이 (아이콘, ID 표시, 연결 끊기)
 │   └── crates/
 │       ├── capture/              # 화면 캡처 + VP8 인코딩
 │       ├── input/                # 입력 주입 enigo (Phase 3)
 │       ├── network/              # WebSocket 시그널링 + WebRTC
 │       ├── file_transfer/        # 파일 전송 (Phase 4)
+│       ├── audio/                # cpal 마이크 캡처/재생, opus 인코딩/디코딩
 │       ├── auth/                 # Argon2id 해싱 + 자격증명 생성
 │       └── proto/                # prost 코드 생성
 │
 ├── viewer-client/                # TypeScript React 뷰어
+│   ├── electron/
+│   │   ├── main.ts               # electron-updater, 트레이
+│   │   └── preload.ts            # contextBridge IPC
 │   └── src/
 │       ├── App.tsx
 │       ├── core/
@@ -58,9 +62,13 @@ Remote_Work/
 │       │   ├── RemoteScreen.tsx  # <video> WebRTC 스트림 표시
 │       │   ├── Toolbar.tsx
 │       │   ├── ChatPanel.tsx
-│       │   └── FileTransfer.tsx
+│       │   ├── FileTransfer.tsx
+│       │   ├── SessionStatusOverlay.tsx  # 재연결/idle 경고/세션 만료 오버레이
+│       │   └── UpdateBanner.tsx          # 자동 업데이터 알림 배너
+│       ├── hooks/
+│       │   └── useIdleTimeout.ts # 5분 비활성 감지 훅
 │       └── stores/
-│           ├── connection-store.ts   # Zustand: 연결 상태, remoteStream
+│           ├── connection-store.ts   # Zustand: 연결 상태, remoteStream, reconnectingSince, disconnectReason, lastInputAt, idleWarning
 │           ├── chat-store.ts
 │           └── file-transfer-store.ts
 │
@@ -167,9 +175,11 @@ Remote_Work/
 
 **시그널링 메시지 포맷 (JSON):**
 ```json
-{ "type": "connect_request", "payload": { "target_host_id": "...", "password_hash": "...", "viewer_session_id": "..." } }
-{ "type": "sdp_offer",       "payload": { "sdp": "...", "session_token": "..." } }
-{ "type": "ice_candidate",   "payload": { "candidate": "...", "sdp_mid": "...", "sdp_mline_index": 0, "session_token": "..." } }
+{ "type": "connect_request",          "payload": { "target_host_id": "...", "password_hash": "...", "viewer_session_id": "..." } }
+{ "type": "sdp_offer",                "payload": { "sdp": "...", "session_token": "..." } }
+{ "type": "ice_candidate",            "payload": { "candidate": "...", "sdp_mid": "...", "sdp_mline_index": 0, "session_token": "..." } }
+{ "type": "session_timeout_warning",  "payload": { "seconds_remaining": 30 } }
+{ "type": "session_expired",          "payload": { "reason": "idle_timeout" } }
 ```
 
 ---
@@ -194,3 +204,5 @@ Viewer (JSON/WS)          Signaling Server           Host (Protobuf/WS)
        │◀═══════════ WebRTC P2P VP8 비디오 스트림 ══════════│
        │                         │                    xcap→I420→VP8→write_sample()
 ```
+
+> Phase 5 이후: 시그널링 연결은 WSS(TLS), 비밀번호는 Argon2id 해시, 재연결은 지수 백오프(최대 10회)
