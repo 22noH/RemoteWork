@@ -3,7 +3,10 @@ use bytes::Bytes;
 use prost::Message as ProstMessage;
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -581,67 +584,93 @@ async fn capture_loop(
     video_track: Arc<TrackLocalStaticSample>,
     mut stop_rx: broadcast::Receiver<()>,
 ) {
-    let capturer = match capture::Capturer::new() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to initialise screen capturer: {}", e);
-            return;
+    // The screen capturer (xcap) and VP8 encoder (vpx) hold raw pointers and
+    // are therefore not `Send`. Keep them on a dedicated OS thread so this
+    // async future stays `Send` (required by `tokio::spawn`). Encoded frames
+    // are forwarded to the async side over a channel for `write_sample`.
+    let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<(Vec<u8>, Duration)>();
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&stop_flag);
+
+    std::thread::spawn(move || {
+        let capturer = match capture::Capturer::new() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to initialise screen capturer: {}", e);
+                return;
+            }
+        };
+
+        let width = capturer.width();
+        let height = capturer.height();
+
+        let mut encoder = match capture::Encoder::new(width, height, 30, 2000) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::error!("Failed to initialise VP8 encoder: {}", e);
+                return;
+            }
+        };
+
+        tracing::info!(
+            "Capture loop started ({}x{} @ 30 fps, 2 Mbps VP8)",
+            width,
+            height
+        );
+
+        let frame_duration = Duration::from_millis(33);
+
+        while !thread_stop.load(Ordering::Relaxed) {
+            let frame = match capturer.capture_frame() {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::warn!("Capture failed: {}", e);
+                    std::thread::sleep(frame_duration);
+                    continue;
+                }
+            };
+
+            let encoded_frames = match encoder.encode(&frame) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!("Encode failed: {}", e);
+                    continue;
+                }
+            };
+
+            for ef in encoded_frames {
+                if frame_tx.send((ef.data, frame_duration)).is_err() {
+                    return; // async side dropped; stop capturing
+                }
+            }
+
+            std::thread::sleep(frame_duration);
         }
-    };
-
-    let width = capturer.width();
-    let height = capturer.height();
-
-    let mut encoder = match capture::Encoder::new(width, height, 30, 2000) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to initialise VP8 encoder: {}", e);
-            return;
-        }
-    };
-
-    tracing::info!(
-        "Capture loop started ({}x{} @ 30 fps, 2 Mbps VP8)",
-        width,
-        height
-    );
-
-    let frame_duration = Duration::from_millis(33);
-    let mut ticker = interval(frame_duration);
+        tracing::info!("Capture thread stopped");
+    });
 
     loop {
         tokio::select! {
             _ = stop_rx.recv() => {
                 tracing::info!("Capture loop stopped");
+                stop_flag.store(true, Ordering::Relaxed);
                 break;
             }
-            _ = ticker.tick() => {
-                let frame = match capturer.capture_frame() {
-                    Ok(f) => f,
-                    Err(e) => {
-                        tracing::warn!("Capture failed: {}", e);
-                        continue;
+            maybe = frame_rx.recv() => {
+                match maybe {
+                    Some((data, duration)) => {
+                        let sample = Sample {
+                            data: Bytes::from(data),
+                            duration,
+                            ..Default::default()
+                        };
+                        if let Err(e) = video_track.write_sample(&sample).await {
+                            tracing::warn!("write_sample failed (session may have ended): {}", e);
+                            stop_flag.store(true, Ordering::Relaxed);
+                            return;
+                        }
                     }
-                };
-
-                let encoded_frames = match encoder.encode(&frame) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        tracing::warn!("Encode failed: {}", e);
-                        continue;
-                    }
-                };
-
-                for ef in encoded_frames {
-                    let sample = Sample {
-                        data: Bytes::from(ef.data),
-                        duration: frame_duration,
-                        ..Default::default()
-                    };
-                    if let Err(e) = video_track.write_sample(&sample).await {
-                        tracing::warn!("write_sample failed (session may have ended): {}", e);
-                        return;
-                    }
+                    None => break, // capture thread ended
                 }
             }
         }

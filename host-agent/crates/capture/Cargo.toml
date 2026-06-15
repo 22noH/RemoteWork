@@ -10,3 +10,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 xcap = "0.0.14"
 vpx-encode = "0.4"
+# Enable build-time FFI binding generation so libvpx versions without
+# pregenerated bindings (e.g. vcpkg's 1.15.2) build via bindgen. Feature
+# unification turns this on for the env-libvpx-sys vpx-encode pulls in.
+env-libvpx-sys = { version = "5", features = ["generate"] }
