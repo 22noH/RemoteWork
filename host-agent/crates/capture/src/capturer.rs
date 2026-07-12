@@ -9,9 +9,13 @@ pub struct Capturer {
 impl Capturer {
     pub fn new() -> Result<Self> {
         let monitors = Monitor::all()?;
+        // Prefer the primary monitor (its top-left is the virtual-desktop origin,
+        // so input coordinates map correctly). Fall back to the first monitor.
         let monitor = monitors
-            .into_iter()
-            .next()
+            .iter()
+            .find(|m| m.is_primary())
+            .cloned()
+            .or_else(|| monitors.into_iter().next())
             .ok_or_else(|| anyhow::anyhow!("No monitors found"))?;
         Ok(Self { monitor })
     }

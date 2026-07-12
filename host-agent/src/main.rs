@@ -4,8 +4,8 @@ mod ui;
 
 use app::Shared;
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize},
-    Arc,
+    atomic::{AtomicBool, AtomicU8, AtomicUsize},
+    Arc, OnceLock,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -28,6 +28,9 @@ fn main() -> anyhow::Result<()> {
         allow_control: Arc::new(AtomicBool::new(config.allow_control)),
         viewer_count: Arc::new(AtomicUsize::new(0)),
         disconnect_all: Arc::new(AtomicBool::new(false)),
+        pending_approval: Arc::new(AtomicBool::new(false)),
+        approval_decision: Arc::new(AtomicU8::new(0)),
+        ctx: Arc::new(OnceLock::new()),
     };
 
     // The network stack is async; egui must own the main thread. Run tokio on a

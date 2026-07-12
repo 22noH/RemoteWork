@@ -21,6 +21,11 @@ struct Cli {
     /// Path to TLS private key (PEM). Required if --tls-cert is set.
     #[arg(long, env = "TLS_KEY")]
     tls_key: Option<String>,
+
+    /// Allow plaintext WS with no TLS. Viewer passwords then travel in
+    /// cleartext — for local development only, never production.
+    #[arg(long, env = "ALLOW_INSECURE")]
+    insecure: bool,
 }
 
 #[tokio::main]
@@ -46,8 +51,15 @@ async fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("--tls-key required when TLS is enabled"))?;
         tracing::info!("TLS enabled (cert={}, key={})", cert_path, key_path);
         ws_server::run_server_tls(cli.listen, registry, cert_path, key_path).await
-    } else {
-        tracing::info!("TLS disabled — plaintext WS");
+    } else if cli.insecure {
+        tracing::warn!(
+            "TLS disabled (--insecure): viewer passwords travel in CLEARTEXT. Local development only — never production."
+        );
         ws_server::run_server(cli.listen, registry).await
+    } else {
+        anyhow::bail!(
+            "Refusing to start without TLS — viewer passwords would travel in cleartext. \
+             Provide --tls-cert and --tls-key, or pass --insecure for local development."
+        );
     }
 }

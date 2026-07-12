@@ -4,8 +4,8 @@ use prost::Message as ProstMessage;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        Arc, OnceLock,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -38,6 +38,43 @@ pub struct Shared {
     pub viewer_count: Arc<AtomicUsize>,
     /// Set by the UI "Disconnect all" button; the reconnect loop polls it.
     pub disconnect_all: Arc<AtomicBool>,
+    /// True while a connection request is waiting for the host to allow/deny.
+    pub pending_approval: Arc<AtomicBool>,
+    /// UI's answer to a pending request: 0 = undecided, 1 = allow, 2 = deny.
+    pub approval_decision: Arc<AtomicU8>,
+    /// egui context (set once the UI starts) so the network thread can pop the
+    /// window to the front when a request arrives, even if minimized to tray.
+    pub ctx: Arc<OnceLock<eframe::egui::Context>>,
+}
+
+/// Block until the host allows or denies the pending connection. Auto-denies
+/// after 30s so an ignored prompt can't wedge the event loop forever.
+async fn request_approval(shared: &Shared) -> bool {
+    shared.approval_decision.store(0, Ordering::Relaxed);
+    shared.pending_approval.store(true, Ordering::Relaxed);
+    if let Some(ctx) = shared.ctx.get() {
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
+        ctx.request_repaint();
+    }
+    let mut waited = Duration::ZERO;
+    let timeout = Duration::from_secs(30);
+    let decision = loop {
+        match shared.approval_decision.load(Ordering::Relaxed) {
+            1 => break true,
+            2 => break false,
+            _ => {
+                if waited >= timeout {
+                    tracing::warn!("Connection request timed out — auto-denied");
+                    break false;
+                }
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                waited += Duration::from_millis(150);
+            }
+        }
+    };
+    shared.pending_approval.store(false, Ordering::Relaxed);
+    decision
 }
 
 pub struct App {
@@ -252,7 +289,14 @@ async fn handle_event(
         }
 
         SignalingEvent::SdpOffer { sdp, session_token } => {
-            tracing::info!("Processing SDP offer for session {}", session_token);
+            tracing::info!("Connection request for session {}", session_token);
+
+            // Require the host to approve before accepting the connection.
+            if !request_approval(shared).await {
+                tracing::info!("Connection denied by host for session {}", session_token);
+                return;
+            }
+            tracing::info!("Connection approved — processing SDP offer for {}", session_token);
 
             // Get screen dimensions for input coordinate mapping
             let (screen_width, screen_height) = capture::Capturer::new()
