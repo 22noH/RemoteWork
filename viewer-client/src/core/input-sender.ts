@@ -79,7 +79,7 @@ function encodeInputEvent(payload: object): ArrayBuffer | null {
   const msg = InputEventType.create(payload)
   const buf = InputEventType.encode(msg).finish()
   // Return a copy of the underlying buffer slice
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
 }
 
 export class InputSender {

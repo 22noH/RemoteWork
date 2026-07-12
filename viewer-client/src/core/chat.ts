@@ -31,7 +31,7 @@ const ChatEnvelopeType = root.lookupType('remote_work.ChatEnvelope')
 function encodeEnvelope(payload: object): ArrayBuffer {
   const msg = ChatEnvelopeType.create(payload)
   const buf = ChatEnvelopeType.encode(msg).finish()
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
 }
 
 export class ChatManager {

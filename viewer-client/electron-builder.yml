@@ -28,5 +28,5 @@ nsis:
   createStartMenuShortcut: true
 publish:
   provider: github
-  owner: OWNER
-  repo: REPO
+  owner: 22noH
+  repo: RemoteWork

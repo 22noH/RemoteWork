@@ -3,7 +3,7 @@ import { SignalingClient } from '../core/signaling'
 import { RemotePeerConnection } from '../core/peer-connection'
 import { useConnectionStore } from '../stores/connection-store'
 
-const SIGNALING_URL = (import.meta as { env: { VITE_SIGNALING_URL?: string } }).env.VITE_SIGNALING_URL ?? 'ws://localhost:8080'
+const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL ?? 'ws://localhost:8080'
 
 export default function ConnectionDialog() {
   const [hostId, setHostId] = useState('')
@@ -11,7 +11,7 @@ export default function ConnectionDialog() {
   const [isConnecting, setIsConnecting] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [turnUrl, setTurnUrl] = useState(
-    (import.meta as { env: { VITE_TURN_URL?: string } }).env.VITE_TURN_URL ?? ''
+    import.meta.env.VITE_TURN_URL ?? ''
   )
   const [turnUsername, setTurnUsername] = useState('')
   const [turnCredential, setTurnCredential] = useState('')
