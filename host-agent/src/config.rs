@@ -4,6 +4,9 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub host_id: String,
+    /// One-time password: regenerated every launch and never written to disk,
+    /// so a leaked password is useless after the session ends.
+    #[serde(skip)]
     pub password: String,
     pub signaling_server_url: String,
     pub stun_servers: Vec<String>,
@@ -33,10 +36,11 @@ impl Config {
             let content = std::fs::read_to_string(&config_path)?;
             serde_json::from_str(&content)?
         } else {
-            let config = Self::default_config();
-            config.save()?;
-            config
+            Self::default_config()
         };
+
+        // One-time password: freshly generated each launch, never persisted.
+        config.password = auth::generate_password();
 
         // Env var overrides (take precedence over config file)
         if let Ok(url) = std::env::var("SIGNALING_URL") {
@@ -49,6 +53,9 @@ impl Config {
             config.turn_server = Self::turn_from_env();
         }
 
+        // Persist host_id + settings (password is #[serde(skip)], so this also
+        // strips any password left in an older config file).
+        config.save()?;
         Ok(config)
     }
 
