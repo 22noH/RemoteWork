@@ -2,7 +2,10 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use webrtc::{
-    api::{media_engine::MediaEngine, APIBuilder},
+    api::{
+        media_engine::{MediaEngine, MIME_TYPE_OPUS, MIME_TYPE_VP8},
+        APIBuilder,
+    },
     data_channel::{data_channel_message::DataChannelMessage, RTCDataChannel},
     ice_transport::{
         ice_candidate::{RTCIceCandidate, RTCIceCandidateInit},
@@ -16,7 +19,6 @@ use webrtc::{
     },
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     track::track_local::track_local_static_sample::TrackLocalStaticSample,
-    MIME_TYPE_OPUS, MIME_TYPE_VP8,
 };
 
 /// All channel senders/receivers needed by the data channels.
@@ -102,25 +104,23 @@ impl HostPeerConnection {
             pc.on_track(Box::new(move |track, _receiver, _transceiver| {
                 let audio_rx_tx = audio_rx_tx.clone();
                 Box::pin(async move {
-                    if let Some(track) = track {
-                        let mime = track.codec().capability.mime_type.clone();
-                        if mime.contains("opus") {
-                            tracing::info!("Receiving incoming audio track");
-                            tokio::spawn(async move {
-                                let mut buf = vec![0u8; 1500];
-                                loop {
-                                    match track.read(&mut buf).await {
-                                        Ok((n, _)) => {
-                                            let _ = audio_rx_tx.send(buf[..n].to_vec());
-                                        }
-                                        Err(e) => {
-                                            tracing::debug!("Audio track read ended: {}", e);
-                                            break;
-                                        }
+                    let mime = track.codec().capability.mime_type.clone();
+                    if mime.contains("opus") {
+                        tracing::info!("Receiving incoming audio track");
+                        tokio::spawn(async move {
+                            let mut buf = vec![0u8; 1500];
+                            loop {
+                                match track.read(&mut buf).await {
+                                    Ok((pkt, _)) => {
+                                        let _ = audio_rx_tx.send(pkt.payload.to_vec());
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!("Audio track read ended: {}", e);
+                                        break;
                                     }
                                 }
-                            });
-                        }
+                            }
+                        });
                     }
                 })
             }));

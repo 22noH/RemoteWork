@@ -1,5 +1,5 @@
 use anyhow::Result;
-use vpx_encode::{Codec, Config, Encoder as VpxEncoder};
+use vpx_encode::{Config, Encoder as VpxEncoder, VideoCodecId};
 use super::{EncodedFrame, Frame};
 use std::time::SystemTime;
 
@@ -17,7 +17,7 @@ impl Encoder {
             height,
             timebase: [1, fps as i32],
             bitrate: bitrate_kbps,
-            codec: Codec::VP8,
+            codec: VideoCodecId::VP8,
         };
         let inner = VpxEncoder::new(config)?;
         Ok(Self { inner, frame_count: 0, width, height })
@@ -30,15 +30,10 @@ impl Encoder {
             .unwrap()
             .as_micros() as u64;
 
-        let packets = self.inner.encode(
-            self.frame_count as i64,
-            &i420,
-            vpx_encode::VPX_DL_REALTIME,
-        )?;
+        let packets = self.inner.encode(self.frame_count as i64, &i420)?;
         self.frame_count += 1;
 
         Ok(packets
-            .iter()
             .map(|p| EncodedFrame {
                 data: p.data.to_vec(),
                 timestamp_us,

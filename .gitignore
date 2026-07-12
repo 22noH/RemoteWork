@@ -26,3 +26,10 @@ npm-debug.log*
 # Runtime state
 operations/activity/
 operations/sessions/
+
+# Rust build artifacts
+target/
+
+# Viewer build output
+viewer-client/dist/
+viewer-client/dist-electron/
