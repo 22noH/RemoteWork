@@ -81,8 +81,8 @@ const KO: Strings = Strings {
 pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([380.0, 530.0])
-            .with_min_inner_size([380.0, 530.0])
+            .with_inner_size([380.0, 590.0])
+            .with_min_inner_size([380.0, 590.0])
             .with_resizable(false),
         ..Default::default()
     };
