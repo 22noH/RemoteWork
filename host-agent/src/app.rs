@@ -49,6 +49,9 @@ pub struct Shared {
     pub chat_log: Arc<std::sync::Mutex<Vec<ChatLine>>>,
     /// Sender for host-typed chat (set per session); None when nobody connected.
     pub chat_send: Arc<std::sync::Mutex<Option<mpsc::UnboundedSender<String>>>>,
+    /// The host's in-progress chat input (shared so the separate chat window,
+    /// an egui viewport, can own it).
+    pub chat_input: Arc<std::sync::Mutex<String>>,
 }
 
 /// One line in the host chat transcript.

@@ -92,8 +92,8 @@ const KO: Strings = Strings {
 pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([380.0, 640.0])
-            .with_min_inner_size([380.0, 640.0])
+            .with_inner_size([380.0, 470.0])
+            .with_min_inner_size([380.0, 470.0])
             .with_resizable(false),
         ..Default::default()
     };
@@ -125,7 +125,6 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
                 tray,
                 tray_show,
                 tray_quit,
-                chat_input: String::new(),
             }))
         }),
     )
@@ -235,7 +234,6 @@ struct HostUi {
     tray: Option<TrayIcon>,
     tray_show: Arc<AtomicBool>,
     tray_quit: Arc<AtomicBool>,
-    chat_input: String,
 }
 
 impl eframe::App for HostUi {
@@ -336,64 +334,86 @@ impl eframe::App for HostUi {
                 if ui.add_enabled(count > 0, btn).clicked() {
                     self.shared.disconnect_all.store(true, Ordering::Relaxed);
                 }
+            });
 
-                // Chat panel
-                ui.add_space(14.0);
-                ui.separator();
-                ui.label(egui::RichText::new(self.s.chat_title).size(13.0).strong().color(VALUE));
-                ui.add_space(4.0);
-                egui::Frame::none()
-                    .fill(CARD_BG)
-                    .stroke(egui::Stroke::new(1.0, CARD_STROKE))
-                    .rounding(8.0)
-                    .inner_margin(egui::Margin::same(8.0))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        egui::ScrollArea::vertical()
-                            .max_height(150.0)
-                            .auto_shrink([false, false])
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                let log = self.shared.chat_log.lock().unwrap();
-                                if log.is_empty() {
-                                    ui.label(egui::RichText::new(self.s.chat_empty).size(11.0).color(LABEL));
-                                } else {
-                                    for line in log.iter() {
-                                        let (who, col) = if line.from_me {
-                                            (self.s.chat_you, ACCENT)
-                                        } else {
-                                            (self.s.chat_peer, egui::Color32::from_rgb(90, 100, 115))
-                                        };
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.label(egui::RichText::new(format!("{who}:")).size(12.0).strong().color(col));
-                                            ui.label(egui::RichText::new(&line.text).size(12.0).color(VALUE));
-                                        });
+        // Chat lives in its own always-on-top window near the screen bottom, so
+        // it stays reachable even when the main window is hidden or covered. It
+        // only exists while a viewer is connected.
+        if self.shared.chat_send.lock().unwrap().is_some() {
+            chat_window(ctx, &self.shared, self.s);
+        }
+    }
+}
+
+/// Separate always-on-top chat window (an egui viewport), docked bottom-right.
+fn chat_window(ctx: &egui::Context, shared: &Shared, s: &'static Strings) {
+    let monitor = ctx.input(|i| i.viewport().monitor_size).unwrap_or(egui::vec2(1920.0, 1080.0));
+    let size = egui::vec2(340.0, 300.0);
+    let pos = egui::pos2(monitor.x - size.x - 24.0, monitor.y - size.y - 64.0);
+    let builder = egui::ViewportBuilder::default()
+        .with_title(s.chat_title)
+        .with_inner_size(size)
+        .with_min_inner_size([280.0, 200.0])
+        .with_position(pos)
+        .with_always_on_top();
+
+    let shared = shared.clone();
+    ctx.show_viewport_deferred(
+        egui::ViewportId::from_hash_of("host_chat"),
+        builder,
+        move |ctx, _class| {
+            ctx.request_repaint_after(Duration::from_millis(400));
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().inner_margin(egui::Margin::same(12.0)).fill(egui::Color32::WHITE))
+                .show(ctx, |ui| {
+                    // Input row pinned to the bottom; transcript fills the rest.
+                    egui::TopBottomPanel::bottom("chat_input_row")
+                        .frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(0.0, 8.0)))
+                        .show_inside(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let mut input = shared.chat_input.lock().unwrap();
+                                let resp = ui.add(
+                                    egui::TextEdit::singleline(&mut *input)
+                                        .desired_width(ui.available_width() - 60.0)
+                                        .hint_text(s.chat_placeholder),
+                                );
+                                let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                let send = ui.button(s.chat_send).clicked();
+                                if (enter || send) && !input.trim().is_empty() {
+                                    let text = input.trim().to_string();
+                                    if let Some(tx) = shared.chat_send.lock().unwrap().as_ref() {
+                                        let _ = tx.send(text);
                                     }
+                                    input.clear();
+                                    resp.request_focus();
                                 }
                             });
-                    });
-                ui.add_space(6.0);
-                let connected = self.shared.chat_send.lock().unwrap().is_some();
-                ui.horizontal(|ui| {
-                    let resp = ui.add_enabled(
-                        connected,
-                        egui::TextEdit::singleline(&mut self.chat_input)
-                            .desired_width(ui.available_width() - 64.0)
-                            .hint_text(self.s.chat_placeholder),
-                    );
-                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let send = ui.add_enabled(connected, egui::Button::new(self.s.chat_send)).clicked();
-                    if (enter || send) && !self.chat_input.trim().is_empty() {
-                        let text = self.chat_input.trim().to_string();
-                        if let Some(tx) = self.shared.chat_send.lock().unwrap().as_ref() {
-                            let _ = tx.send(text);
-                        }
-                        self.chat_input.clear();
-                        resp.request_focus();
-                    }
+                        });
+                    egui::ScrollArea::vertical()
+                        .stick_to_bottom(true)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let log = shared.chat_log.lock().unwrap();
+                            if log.is_empty() {
+                                ui.label(egui::RichText::new(s.chat_empty).size(12.0).color(LABEL));
+                            } else {
+                                for line in log.iter() {
+                                    let (who, col) = if line.from_me {
+                                        (s.chat_you, ACCENT)
+                                    } else {
+                                        (s.chat_peer, egui::Color32::from_rgb(90, 100, 115))
+                                    };
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(egui::RichText::new(format!("{who}:")).size(13.0).strong().color(col));
+                                        ui.label(egui::RichText::new(&line.text).size(13.0).color(VALUE));
+                                    });
+                                    ui.add_space(2.0);
+                                }
+                            }
+                        });
                 });
-            });
-    }
+        },
+    );
 }
 
 impl HostUi {
