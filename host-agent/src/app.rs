@@ -55,6 +55,48 @@ pub struct Shared {
     /// Whether the chat window is currently shown. Closing it sets this false;
     /// a new incoming message reopens it (notification-style).
     pub chat_open: Arc<AtomicBool>,
+    /// A file the viewer wants to send, awaiting the host's accept/deny.
+    pub pending_file: Arc<std::sync::Mutex<Option<PendingFile>>>,
+    /// Host's answer to a pending file: 0 = undecided, 1 = accept, 2 = deny.
+    pub file_decision: Arc<AtomicU8>,
+}
+
+/// A file transfer awaiting the host's approval.
+#[derive(Clone)]
+pub struct PendingFile {
+    pub name: String,
+    pub size: u64,
+    /// Where the file will be saved (shown in the prompt).
+    pub dest_dir: String,
+}
+
+/// Block until the host accepts or denies an incoming file. Auto-denies after
+/// 30s so an ignored prompt can't wedge the transfer loop.
+async fn request_file_approval(shared: &Shared, name: String, size: u64, dest_dir: String) -> bool {
+    shared.file_decision.store(0, Ordering::Relaxed);
+    *shared.pending_file.lock().unwrap() = Some(PendingFile { name, size, dest_dir });
+    if let Some(ctx) = shared.ctx.get() {
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
+        ctx.request_repaint();
+    }
+    let mut waited = Duration::ZERO;
+    let decision = loop {
+        match shared.file_decision.load(Ordering::Relaxed) {
+            1 => break true,
+            2 => break false,
+            _ => {
+                if waited >= Duration::from_secs(30) {
+                    tracing::warn!("File request timed out — auto-denied");
+                    break false;
+                }
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                waited += Duration::from_millis(150);
+            }
+        }
+    };
+    *shared.pending_file.lock().unwrap() = None;
+    decision
 }
 
 /// One line in the host chat transcript.
@@ -384,7 +426,6 @@ async fn handle_event(
             {
                 let (chat_out_tx, mut chat_out_rx) = mpsc::unbounded_channel::<String>();
                 *shared.chat_send.lock().unwrap() = Some(chat_out_tx);
-                shared.chat_open.store(true, Ordering::Relaxed);
                 let chat_reply_tx = chat_reply_tx.clone();
                 let chat_log = shared.chat_log.clone();
                 tokio::spawn(async move {
@@ -412,6 +453,7 @@ async fn handle_event(
                 file_rx,
                 file_reply_tx.clone(),
                 config.allowed_dirs.clone(),
+                shared.clone(),
             ));
 
             // Audio channels
@@ -678,9 +720,12 @@ async fn run_chat_loop(mut rx: mpsc::UnboundedReceiver<Vec<u8>>, shared: Shared)
                     Some(Payload::Message(msg)) => {
                         tracing::info!("[Chat] {}: {}", msg.sender, msg.content);
                         push_chat(chat_log, ChatLine { from_me: false, text: msg.content });
-                        // Reopen the chat window (notification-style) and wake the UI.
+                        // Switch to the chat screen and pop the window forward
+                        // (notification-style) so the host sees the message.
                         shared.chat_open.store(true, Ordering::Relaxed);
                         if let Some(ctx) = shared.ctx.get() {
+                            ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Visible(true));
+                            ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
                             ctx.request_repaint();
                         }
                     }
@@ -707,6 +752,7 @@ async fn run_file_loop(
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     reply_tx: mpsc::UnboundedSender<Vec<u8>>,
     allowed_dirs: Vec<std::path::PathBuf>,
+    shared: Shared,
 ) {
     use prost::Message;
     use proto::remote_work::{
@@ -714,6 +760,12 @@ async fn run_file_loop(
         FileTransferError, FileTransferMessage, FileTransferReject,
     };
 
+    // The host decides where received files land — never the viewer. Prefer the
+    // Downloads folder; fall back to the first allowed directory (home).
+    let save_dir = dirs::download_dir()
+        .filter(|d| allowed_dirs.iter().any(|r| d.starts_with(r)))
+        .or_else(|| allowed_dirs.first().cloned())
+        .unwrap_or_default();
     let fs_access = file_transfer::fs_access::FsAccess::new(allowed_dirs);
     let mut receiver = file_transfer::FileReceiver::new();
 
@@ -721,10 +773,38 @@ async fn run_file_loop(
         match FileTransferMessage::decode(bytes.as_slice()) {
             Ok(msg) => match msg.payload {
                 Some(Payload::Request(req)) => {
-                    let dest =
-                        std::path::Path::new(&req.destination_path).join(&req.file_name);
+                    // Use only the file's base name (strip any path from the
+                    // viewer) and save under the host's chosen directory.
+                    let fname = std::path::Path::new(&req.file_name)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "received_file".to_string());
+                    let dest = save_dir.join(&fname);
                     match fs_access.validate_path(&dest) {
                         Ok(safe_path) => {
+                            // Ask the host before receiving the file (don't write
+                            // to disk silently).
+                            if !request_file_approval(
+                                &shared,
+                                fname.clone(),
+                                req.file_size,
+                                save_dir.display().to_string(),
+                            )
+                            .await
+                            {
+                                tracing::info!(
+                                    "[FileTransfer] Declined by host: {}",
+                                    req.file_name
+                                );
+                                let reject = FileTransferMessage {
+                                    payload: Some(Payload::Reject(FileTransferReject {
+                                        transfer_id: req.transfer_id,
+                                        reason: "Declined by host".to_string(),
+                                    })),
+                                };
+                                let _ = reply_tx.send(reject.encode_to_vec());
+                                continue;
+                            }
                             tracing::info!(
                                 "[FileTransfer] Accept: {} ({} bytes)",
                                 req.file_name,

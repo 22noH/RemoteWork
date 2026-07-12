@@ -8,6 +8,13 @@ pub struct FsAccess {
 
 impl FsAccess {
     pub fn new(allowed_roots: Vec<PathBuf>) -> Self {
+        // Canonicalize the roots so they match canonicalized target paths. On
+        // Windows canonicalize returns a `\\?\`-prefixed path, so an un-prefixed
+        // root would never `starts_with` a canonicalized target.
+        let allowed_roots = allowed_roots
+            .into_iter()
+            .map(|r| std::fs::canonicalize(&r).unwrap_or(r))
+            .collect();
         Self { allowed_roots }
     }
 

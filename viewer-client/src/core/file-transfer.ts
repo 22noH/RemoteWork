@@ -33,7 +33,10 @@ message FileTransferError { string transfer_id = 1; string error = 2; }
 message FileTransferCancel { string transfer_id = 1; }
 `
 
-const root = protobuf.parse(FILE_PROTO_TEXT).root
+// keepCase: this module addresses the proto fields by their snake_case names
+// (file_name, transfer_id, …); without it protobufjs camelCases them and every
+// field silently becomes empty.
+const root = protobuf.parse(FILE_PROTO_TEXT, { keepCase: true }).root
 const FileTransferMessageType = root.lookupType(
   'remote_work.FileTransferMessage',
 )
