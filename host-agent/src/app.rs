@@ -45,6 +45,27 @@ pub struct Shared {
     /// egui context (set once the UI starts) so the network thread can pop the
     /// window to the front when a request arrives, even if minimized to tray.
     pub ctx: Arc<OnceLock<eframe::egui::Context>>,
+    /// Chat transcript shown in the host window (incoming + host-sent).
+    pub chat_log: Arc<std::sync::Mutex<Vec<ChatLine>>>,
+    /// Sender for host-typed chat (set per session); None when nobody connected.
+    pub chat_send: Arc<std::sync::Mutex<Option<mpsc::UnboundedSender<String>>>>,
+}
+
+/// One line in the host chat transcript.
+#[derive(Clone)]
+pub struct ChatLine {
+    pub from_me: bool,
+    pub text: String,
+}
+
+/// Append a chat line, keeping the transcript bounded.
+fn push_chat(log: &Arc<std::sync::Mutex<Vec<ChatLine>>>, line: ChatLine) {
+    let mut l = log.lock().unwrap();
+    l.push(line);
+    let len = l.len();
+    if len > 200 {
+        l.drain(0..len - 200);
+    }
 }
 
 /// Block until the host allows or denies the pending connection. Auto-denies
@@ -335,7 +356,32 @@ async fn handle_event(
             // Chat channels
             let (chat_tx, chat_rx) = mpsc::unbounded_channel::<Vec<u8>>();
             let (chat_reply_tx, chat_reply_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-            tokio::spawn(run_chat_loop(chat_rx));
+            tokio::spawn(run_chat_loop(chat_rx, shared.chat_log.clone()));
+
+            // Host → viewer chat: the UI pushes text; encode it, forward to the
+            // viewer over the reply channel, and echo it into the transcript.
+            {
+                let (chat_out_tx, mut chat_out_rx) = mpsc::unbounded_channel::<String>();
+                *shared.chat_send.lock().unwrap() = Some(chat_out_tx);
+                let chat_reply_tx = chat_reply_tx.clone();
+                let chat_log = shared.chat_log.clone();
+                tokio::spawn(async move {
+                    use prost::Message;
+                    use proto::remote_work::{chat_envelope::Payload, ChatEnvelope, ChatMessage};
+                    while let Some(text) = chat_out_rx.recv().await {
+                        let env = ChatEnvelope {
+                            payload: Some(Payload::Message(ChatMessage {
+                                id: String::new(),
+                                sender: "host".to_string(),
+                                content: text.clone(),
+                                timestamp_ms: now_ms(),
+                            })),
+                        };
+                        let _ = chat_reply_tx.send(env.encode_to_vec());
+                        push_chat(&chat_log, ChatLine { from_me: true, text });
+                    }
+                });
+            }
 
             // File transfer channels
             let (file_tx, file_rx) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -597,7 +643,10 @@ async fn run_control_loop(
 // Chat processing loop
 // ---------------------------------------------------------------------------
 
-async fn run_chat_loop(mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
+async fn run_chat_loop(
+    mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    chat_log: Arc<std::sync::Mutex<Vec<ChatLine>>>,
+) {
     use prost::Message;
     use proto::remote_work::ChatEnvelope;
 
@@ -608,6 +657,7 @@ async fn run_chat_loop(mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
                 match envelope.payload {
                     Some(Payload::Message(msg)) => {
                         tracing::info!("[Chat] {}: {}", msg.sender, msg.content);
+                        push_chat(&chat_log, ChatLine { from_me: false, text: msg.content });
                     }
                     Some(Payload::Typing(t)) => {
                         tracing::debug!(

@@ -32,6 +32,12 @@ struct Strings {
     approval_body: &'static str,
     approve: &'static str,
     deny: &'static str,
+    chat_title: &'static str,
+    chat_placeholder: &'static str,
+    chat_send: &'static str,
+    chat_you: &'static str,
+    chat_peer: &'static str,
+    chat_empty: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -49,6 +55,12 @@ const EN: Strings = Strings {
     approval_body: "Someone is trying to connect to this computer. Allow it?",
     approve: "Allow",
     deny: "Deny",
+    chat_title: "Chat",
+    chat_placeholder: "Type a message…",
+    chat_send: "Send",
+    chat_you: "You",
+    chat_peer: "Viewer",
+    chat_empty: "No messages yet.",
 };
 
 const KO: Strings = Strings {
@@ -66,6 +78,12 @@ const KO: Strings = Strings {
     approval_body: "누군가 이 컴퓨터에 접속하려고 합니다. 허용할까요?",
     approve: "허용",
     deny: "거부",
+    chat_title: "채팅",
+    chat_placeholder: "메시지를 입력하세요…",
+    chat_send: "전송",
+    chat_you: "나",
+    chat_peer: "상대",
+    chat_empty: "아직 메시지가 없습니다.",
 };
 
 /// Small always-on host window: credentials, connection status, live view-only
@@ -74,8 +92,8 @@ const KO: Strings = Strings {
 pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([380.0, 470.0])
-            .with_min_inner_size([380.0, 470.0])
+            .with_inner_size([380.0, 640.0])
+            .with_min_inner_size([380.0, 640.0])
             .with_resizable(false),
         ..Default::default()
     };
@@ -107,6 +125,7 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
                 tray,
                 tray_show,
                 tray_quit,
+                chat_input: String::new(),
             }))
         }),
     )
@@ -216,6 +235,7 @@ struct HostUi {
     tray: Option<TrayIcon>,
     tray_show: Arc<AtomicBool>,
     tray_quit: Arc<AtomicBool>,
+    chat_input: String,
 }
 
 impl eframe::App for HostUi {
@@ -316,6 +336,62 @@ impl eframe::App for HostUi {
                 if ui.add_enabled(count > 0, btn).clicked() {
                     self.shared.disconnect_all.store(true, Ordering::Relaxed);
                 }
+
+                // Chat panel
+                ui.add_space(14.0);
+                ui.separator();
+                ui.label(egui::RichText::new(self.s.chat_title).size(13.0).strong().color(VALUE));
+                ui.add_space(4.0);
+                egui::Frame::none()
+                    .fill(CARD_BG)
+                    .stroke(egui::Stroke::new(1.0, CARD_STROKE))
+                    .rounding(8.0)
+                    .inner_margin(egui::Margin::same(8.0))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        egui::ScrollArea::vertical()
+                            .max_height(150.0)
+                            .auto_shrink([false, false])
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                let log = self.shared.chat_log.lock().unwrap();
+                                if log.is_empty() {
+                                    ui.label(egui::RichText::new(self.s.chat_empty).size(11.0).color(LABEL));
+                                } else {
+                                    for line in log.iter() {
+                                        let (who, col) = if line.from_me {
+                                            (self.s.chat_you, ACCENT)
+                                        } else {
+                                            (self.s.chat_peer, egui::Color32::from_rgb(90, 100, 115))
+                                        };
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.label(egui::RichText::new(format!("{who}:")).size(12.0).strong().color(col));
+                                            ui.label(egui::RichText::new(&line.text).size(12.0).color(VALUE));
+                                        });
+                                    }
+                                }
+                            });
+                    });
+                ui.add_space(6.0);
+                let connected = self.shared.chat_send.lock().unwrap().is_some();
+                ui.horizontal(|ui| {
+                    let resp = ui.add_enabled(
+                        connected,
+                        egui::TextEdit::singleline(&mut self.chat_input)
+                            .desired_width(ui.available_width() - 64.0)
+                            .hint_text(self.s.chat_placeholder),
+                    );
+                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let send = ui.add_enabled(connected, egui::Button::new(self.s.chat_send)).clicked();
+                    if (enter || send) && !self.chat_input.trim().is_empty() {
+                        let text = self.chat_input.trim().to_string();
+                        if let Some(tx) = self.shared.chat_send.lock().unwrap().as_ref() {
+                            let _ = tx.send(text);
+                        }
+                        self.chat_input.clear();
+                        resp.request_focus();
+                    }
+                });
             });
     }
 }
