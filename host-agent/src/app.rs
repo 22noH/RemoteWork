@@ -4,7 +4,7 @@ use prost::Message as ProstMessage;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -29,14 +29,27 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// State shared between the network layer and the egui UI thread.
+#[derive(Clone)]
+pub struct Shared {
+    /// Live view-only toggle: when false, viewer input is ignored.
+    pub allow_control: Arc<AtomicBool>,
+    /// Number of currently connected viewers (for the UI status line).
+    pub viewer_count: Arc<AtomicUsize>,
+    /// Set by the UI "Disconnect all" button; the reconnect loop polls it.
+    pub disconnect_all: Arc<AtomicBool>,
+}
+
 pub struct App {
     config: Arc<Config>,
+    shared: Shared,
 }
 
 impl App {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, shared: Shared) -> Self {
         Self {
             config: Arc::new(config),
+            shared,
         }
     }
 
@@ -55,7 +68,8 @@ impl App {
             let net_config = Arc::clone(&net_config);
             let config = Arc::clone(&config);
             let shutdown_tx_clone = shutdown_tx.clone();
-            tokio::spawn(run_reconnect_loop(net_config, config, shutdown_tx_clone))
+            let shared = self.shared.clone();
+            tokio::spawn(run_reconnect_loop(net_config, config, shutdown_tx_clone, shared))
         };
 
         tokio::signal::ctrl_c().await?;
@@ -75,6 +89,7 @@ async fn run_reconnect_loop(
     net_config: Arc<NetworkConfig>,
     config: Arc<Config>,
     shutdown_tx: broadcast::Sender<()>,
+    shared: Shared,
 ) {
     let mut backoff = Duration::from_secs(1);
     let max_backoff = Duration::from_secs(30);
@@ -91,13 +106,25 @@ async fn run_reconnect_loop(
                 ping_interval.tick().await; // consume the immediate first tick
                 let mut health_interval = interval(Duration::from_secs(30));
                 health_interval.tick().await;
+                // ponytail: 250ms poll of the UI "disconnect all" flag — simplest
+                // bridge from the sync egui thread; a Notify would be tidier if the
+                // UI ever needs more commands.
+                let mut ui_poll = interval(Duration::from_millis(250));
 
                 loop {
                     tokio::select! {
                         _ = shutdown.recv() => {
                             tracing::info!("Shutdown received, closing all sessions");
                             cleanup_sessions(&mut sessions).await;
+                            shared.viewer_count.store(0, Ordering::Relaxed);
                             break 'reconnect;
+                        }
+                        _ = ui_poll.tick() => {
+                            if shared.disconnect_all.swap(false, Ordering::Relaxed) {
+                                tracing::info!("Disconnect all requested from UI");
+                                cleanup_sessions(&mut sessions).await;
+                                shared.viewer_count.store(0, Ordering::Relaxed);
+                            }
                         }
                         _ = ping_interval.tick() => {
                             client.send_ping(now_ms());
@@ -134,6 +161,7 @@ async fn run_reconnect_loop(
                                     let _ = session.pc.close().await;
                                 }
                             }
+                            shared.viewer_count.store(sessions.len(), Ordering::Relaxed);
                         }
                         event = event_rx.recv() => {
                             match event {
@@ -145,7 +173,8 @@ async fn run_reconnect_loop(
                                     continue 'reconnect;
                                 }
                                 Some(event) => {
-                                    handle_event(event, &client, &config, &mut sessions).await;
+                                    handle_event(event, &client, &config, &mut sessions, &shared).await;
+                                    shared.viewer_count.store(sessions.len(), Ordering::Relaxed);
                                 }
                                 None => {
                                     tracing::warn!("Event channel closed, reconnecting in {:?}", backoff);
@@ -208,6 +237,7 @@ async fn handle_event(
     client: &Arc<SignalingClient>,
     config: &Arc<Config>,
     sessions: &mut HashMap<String, Session>,
+    shared: &Shared,
 ) {
     match event {
         SignalingEvent::Registered { host_id } => {
@@ -233,7 +263,12 @@ async fn handle_event(
 
             // Input channel
             let (input_tx, input_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-            tokio::spawn(run_input_loop(input_rx, screen_width, screen_height));
+            tokio::spawn(run_input_loop(
+                input_rx,
+                screen_width,
+                screen_height,
+                shared.allow_control.clone(),
+            ));
 
             // Chat channels
             let (chat_tx, chat_rx) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -403,6 +438,7 @@ async fn run_input_loop(
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     screen_width: u32,
     screen_height: u32,
+    allow_control: Arc<AtomicBool>,
 ) {
     let mut handler = match InputHandler::new(screen_width, screen_height) {
         Ok(h) => h,
@@ -419,6 +455,10 @@ async fn run_input_loop(
     );
 
     while let Some(bytes) = rx.recv().await {
+        // Live view-only gate: when control is disabled, drop the event.
+        if !allow_control.load(Ordering::Relaxed) {
+            continue;
+        }
         match InputEvent::decode(bytes.as_slice()) {
             Ok(event) => {
                 if let Err(e) = handler.handle(event) {

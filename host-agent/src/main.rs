@@ -1,48 +1,53 @@
 mod app;
 mod config;
-mod tray;
+mod ui;
 
+use app::Shared;
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize},
+    Arc,
+};
 use tracing_subscriber::EnvFilter;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive("host_agent=debug".parse()?),
+            EnvFilter::from_default_env().add_directive("host_agent=debug".parse()?),
         )
         .init();
 
     let config = config::Config::load()?;
     tracing::info!("Starting host agent");
     tracing::info!("Your ID:       {}", config.host_id);
-    tracing::debug!("Your password: {}", config.password);
-    tracing::info!("Share these credentials with the viewer.");
+    tracing::info!("Your password: {}", config.password);
 
-    // Initialize system tray (best-effort; non-fatal if tray fails)
-    match tray::SystemTray::new(&config.host_id, &config.password) {
-        Ok(mut system_tray) => {
-            let app_future = app::App::new(config).run();
+    let host_id = config.host_id.clone();
+    let password = config.password.clone();
 
-            tokio::select! {
-                result = app_future => result?,
-                Some(msg) = system_tray.event_rx.recv() => {
-                    match msg {
-                        tray::TrayMessage::Quit => {
-                            tracing::info!("Quit via tray");
-                        }
-                        tray::TrayMessage::DisconnectAll => {
-                            tracing::info!("Disconnect all via tray (not yet implemented)");
-                        }
-                    }
-                }
+    let shared = Shared {
+        allow_control: Arc::new(AtomicBool::new(config.allow_control)),
+        viewer_count: Arc::new(AtomicUsize::new(0)),
+        disconnect_all: Arc::new(AtomicBool::new(false)),
+    };
+
+    // The network stack is async; egui must own the main thread. Run tokio on a
+    // background thread and let both sides talk through `shared`.
+    let app_shared = shared.clone();
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!("Failed to start tokio runtime: {}", e);
+                return;
             }
-        }
-        Err(e) => {
-            tracing::warn!("System tray unavailable: {}. Running without tray.", e);
-            app::App::new(config).run().await?;
-        }
-    }
+        };
+        rt.block_on(async move {
+            if let Err(e) = app::App::new(config, app_shared).run().await {
+                tracing::error!("App exited with error: {}", e);
+            }
+        });
+    });
 
-    Ok(())
+    // Blocks until the window is closed; process exit then tears down the runtime.
+    ui::run(host_id, password, shared).map_err(|e| anyhow::anyhow!("UI error: {e}"))
 }

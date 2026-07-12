@@ -9,6 +9,14 @@ pub struct Config {
     pub stun_servers: Vec<String>,
     pub turn_server: Option<TurnConfig>,
     pub allowed_dirs: Vec<PathBuf>,
+    /// When false, the viewer can watch but not control (input is ignored).
+    /// serde default keeps older config.json files working (defaults to true).
+    #[serde(default = "default_allow_control")]
+    pub allow_control: bool,
+}
+
+fn default_allow_control() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +42,9 @@ impl Config {
         if let Ok(url) = std::env::var("SIGNALING_URL") {
             config.signaling_server_url = url;
         }
+        if let Ok(v) = std::env::var("ALLOW_CONTROL") {
+            config.allow_control = !(v == "0" || v.eq_ignore_ascii_case("false"));
+        }
         if config.turn_server.is_none() {
             config.turn_server = Self::turn_from_env();
         }
@@ -56,6 +67,7 @@ impl Config {
             allowed_dirs: vec![
                 dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
             ],
+            allow_control: true,
         }
     }
 

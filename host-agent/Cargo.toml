@@ -46,6 +46,8 @@ bytes = { workspace = true }
 prost = { workspace = true }
 webrtc = { workspace = true }
 dirs = "5"
+eframe = { version = "0.28", default-features = false, features = ["glow", "default_fonts"] }
+sys-locale = "0.3"
 tray-icon = "0.14"
 capture = { path = "crates/capture" }
 input = { path = "crates/input" }
