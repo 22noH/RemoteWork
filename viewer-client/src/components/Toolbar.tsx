@@ -7,8 +7,18 @@ interface Props {
 }
 
 export default function Toolbar({ onToggleChat, onToggleFiles }: Props) {
-  const { hostId, disconnect, isMuted, localAudioTrack, setMuted, connectionState } =
-    useConnectionStore()
+  const {
+    hostId,
+    disconnect,
+    isMuted,
+    localAudioTrack,
+    setMuted,
+    connectionState,
+    monitors,
+    selectedMonitor,
+    selectMonitor,
+    setSelectedMonitor,
+  } = useConnectionStore()
 
   const toggleMute = () => {
     if (localAudioTrack) {
@@ -38,6 +48,24 @@ export default function Toolbar({ onToggleChat, onToggleFiles }: Props) {
         <span className="text-white font-medium text-sm">{statusText}</span>
       </div>
       <div className="flex items-center gap-2">
+        {monitors.length > 1 && selectMonitor && (
+          <select
+            value={selectedMonitor}
+            onChange={(e) => {
+              const i = Number(e.target.value)
+              setSelectedMonitor(i)
+              selectMonitor(i)
+            }}
+            className="px-2 py-1 bg-gray-700 text-white rounded text-sm border border-gray-600"
+            title="Select monitor"
+          >
+            {monitors.map((m) => (
+              <option key={m.index} value={m.index}>
+                {`Monitor ${m.index + 1}${m.primary ? ' (primary)' : ''} — ${m.width}×${m.height}`}
+              </option>
+            ))}
+          </select>
+        )}
         {localAudioTrack && (
           <button
             onClick={toggleMute}

@@ -2,28 +2,41 @@ use anyhow::Result;
 use enigo::{Enigo, Settings};
 use proto::remote_work::{InputEvent, input_event::Event};
 use crate::{mouse, keyboard};
+use std::sync::{Arc, Mutex};
+
+/// Geometry of the monitor currently being shared. Shared so the input mapping
+/// tracks the viewer switching monitors mid-session.
+#[derive(Debug, Clone, Copy)]
+pub struct MonitorGeom {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
 
 pub struct InputHandler {
     enigo: Enigo,
-    screen_width: u32,
-    screen_height: u32,
+    geom: Arc<Mutex<MonitorGeom>>,
 }
 
 impl InputHandler {
-    pub fn new(screen_width: u32, screen_height: u32) -> Result<Self> {
+    pub fn new(geom: Arc<Mutex<MonitorGeom>>) -> Result<Self> {
         let enigo = Enigo::new(&Settings::default())?;
-        Ok(Self { enigo, screen_width, screen_height })
+        Ok(Self { enigo, geom })
     }
 
     pub fn handle(&mut self, event: InputEvent) -> Result<()> {
+        let g = *self.geom.lock().unwrap();
         match event.event {
             Some(Event::MouseMove(mv)) => {
                 mouse::move_mouse(
                     &mut self.enigo,
                     mv.x,
                     mv.y,
-                    self.screen_width,
-                    self.screen_height,
+                    g.x,
+                    g.y,
+                    g.width,
+                    g.height,
                 )?;
             }
             Some(Event::MouseButton(btn)) => {
