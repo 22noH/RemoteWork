@@ -1,12 +1,7 @@
 use crate::app::{ChatLine, Shared};
 use eframe::egui;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
-use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
-    TrayIcon, TrayIconBuilder,
-};
 
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(59, 130, 246); // blue-500
 const GREEN: egui::Color32 = egui::Color32::from_rgb(34, 197, 94);
@@ -26,8 +21,7 @@ struct Strings {
     on_sub: &'static str,
     off_sub: &'static str,
     disconnect: &'static str,
-    tray_open: &'static str,
-    tray_quit: &'static str,
+    quit: &'static str,
     approval_title: &'static str,
     approval_body: &'static str,
     approve: &'static str,
@@ -48,8 +42,7 @@ const EN: Strings = Strings {
     on_sub: "Viewer can control your PC",
     off_sub: "View-only — viewer cannot control",
     disconnect: "Disconnect all",
-    tray_open: "Open",
-    tray_quit: "Quit",
+    quit: "Quit",
     approval_title: "Connection request",
     approval_body: "Someone is trying to connect to this computer. Allow it?",
     approve: "Allow",
@@ -70,8 +63,7 @@ const KO: Strings = Strings {
     on_sub: "상대가 내 PC를 조작할 수 있습니다",
     off_sub: "보기 전용 — 조작할 수 없습니다",
     disconnect: "모두 연결 끊기",
-    tray_open: "열기",
-    tray_quit: "종료",
+    quit: "종료",
     approval_title: "연결 요청",
     approval_body: "누군가 이 컴퓨터에 접속하려고 합니다. 허용할까요?",
     approve: "허용",
@@ -99,19 +91,13 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
         options,
         Box::new(move |cc| {
             style(&cc.egui_ctx);
-            // Hand the context to the network thread so it can pop the window
-            // (from the tray) when a connection request needs approval.
+            // Hand the context to the network thread so it can pop the window to
+            // the front when a connection request needs approval.
             let _ = shared.ctx.set(cc.egui_ctx.clone());
             // Korean UI only if the OS locale is Korean AND the bundled-with-Windows
             // Korean font loads (egui's default fonts have no CJK glyphs).
             let korean = locale_is_korean() && load_korean_font(&cc.egui_ctx);
             let s: &'static Strings = if korean { &KO } else { &EN };
-
-            // System tray so closing the window hides (keeps the session alive)
-            // instead of quitting. Tray thread wakes the egui loop via ctx.
-            let tray_show = Arc::new(AtomicBool::new(false));
-            let tray_quit = Arc::new(AtomicBool::new(false));
-            let tray = build_tray(&host_id, s, cc.egui_ctx.clone(), tray_show.clone(), tray_quit.clone());
 
             Ok(Box::new(HostUi {
                 host_id,
@@ -119,10 +105,8 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
                 shared,
                 korean,
                 s,
-                tray,
-                tray_show,
-                tray_quit,
                 chat_seen_len: 0,
+                quitting: false,
             }))
         }),
     )
@@ -166,52 +150,6 @@ fn load_korean_font(ctx: &egui::Context) -> bool {
     false
 }
 
-/// Build the system tray icon with Open/Quit, and a thread that turns menu
-/// clicks into flags + wakes the egui loop (so it works even while hidden).
-fn build_tray(
-    host_id: &str,
-    s: &'static Strings,
-    ctx: egui::Context,
-    show: Arc<AtomicBool>,
-    quit: Arc<AtomicBool>,
-) -> Option<TrayIcon> {
-    let rgba: Vec<u8> = (0..16 * 16).flat_map(|_| [0u8, 140, 200, 255]).collect();
-    let icon = tray_icon::Icon::from_rgba(rgba, 16, 16).ok()?;
-
-    let open = MenuItem::new(s.tray_open, true, None);
-    let quit_item = MenuItem::new(s.tray_quit, true, None);
-    let menu = Menu::new();
-    menu.append(&open).ok()?;
-    menu.append(&quit_item).ok()?;
-
-    let tray = TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_tooltip(format!("Remote Work - ID: {host_id}"))
-        .with_icon(icon)
-        .build()
-        .ok()?;
-
-    let open_id = open.id().clone();
-    let quit_id = quit_item.id().clone();
-    std::thread::spawn(move || {
-        let rx = MenuEvent::receiver();
-        while let Ok(event) = rx.recv() {
-            // Drive the viewport directly from here — the window may be hidden in
-            // the tray, in which case update() isn't running to poll the flags.
-            if event.id == quit_id {
-                quit.store(true, Ordering::Relaxed);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else if event.id == open_id {
-                show.store(true, Ordering::Relaxed);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-            ctx.request_repaint();
-        }
-    });
-    Some(tray)
-}
-
 fn style(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::light();
     visuals.panel_fill = egui::Color32::WHITE;
@@ -233,33 +171,21 @@ struct HostUi {
     shared: Shared,
     korean: bool,
     s: &'static Strings,
-    /// Kept alive so the tray icon stays visible; None if tray creation failed.
-    tray: Option<TrayIcon>,
-    tray_show: Arc<AtomicBool>,
-    tray_quit: Arc<AtomicBool>,
     /// Chat transcript length last seen, to reopen the window on new messages.
     chat_seen_len: usize,
+    /// Set by the Quit button so the close request is allowed through.
+    quitting: bool,
 }
 
 impl eframe::App for HostUi {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(Duration::from_millis(500));
 
-        // Tray "Quit" → really close (let the window close request through).
-        if self.tray_quit.load(Ordering::Relaxed) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-        // Tray "Open" → re-show a hidden window.
-        if self.tray_show.swap(false, Ordering::Relaxed) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        }
-        // Window close (X): if we have a tray, hide instead of quitting so the
-        // remote session keeps running. Without a tray, let it close normally.
-        if self.tray.is_some() && ctx.input(|i| i.viewport().close_requested()) {
+        // Window close (X): minimize to the taskbar instead of quitting, so the
+        // remote session keeps running. Quit explicitly via the Quit button.
+        if !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
 
         // A connection is waiting for approval — show the prompt instead of the
@@ -355,6 +281,24 @@ impl eframe::App for HostUi {
                 if ui.add_enabled(count > 0, btn).clicked() {
                     self.shared.disconnect_all.store(true, Ordering::Relaxed);
                 }
+
+                // Quit. Closing the window (X) only minimizes to the taskbar so
+                // the session survives; this actually exits.
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(self.s.quit).size(12.0).color(LABEL),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
+                        self.quitting = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
             });
 
         // Chat lives in its own always-on-top window near the screen bottom, so

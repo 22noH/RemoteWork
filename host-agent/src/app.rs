@@ -318,6 +318,21 @@ async fn handle_event(
         SignalingEvent::SdpOffer { sdp, session_token } => {
             tracing::info!("Connection request for session {}", session_token);
 
+            // 1:1 only — reject a second viewer while one is already connected.
+            // A host that lets multiple viewers in at once is an easy way to
+            // lose control of the machine.
+            let busy = sessions.values().any(|s| {
+                use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState as St;
+                !matches!(s.pc.connection_state(), St::Failed | St::Closed)
+            });
+            if busy {
+                tracing::warn!(
+                    "Rejecting {} — a viewer is already connected (1:1 only)",
+                    session_token
+                );
+                return;
+            }
+
             // Require the host to approve before accepting the connection.
             if !request_approval(shared).await {
                 tracing::info!("Connection denied by host for session {}", session_token);
