@@ -154,6 +154,17 @@ export class InputSender {
   }
 
   private handleKey(e: KeyboardEvent, pressed: boolean): void {
+    // Don't forward keystrokes to the host while the user is typing into a UI
+    // field (chat box, etc.) — otherwise chat input controls the remote and,
+    // on the same machine, feeds back into itself.
+    const el = document.activeElement as HTMLElement | null
+    if (
+      el &&
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+    ) {
+      return
+    }
+
     const keyCode = keyCodeToHid(e.code)
     if (keyCode === 0) return
 

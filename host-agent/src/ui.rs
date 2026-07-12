@@ -1,4 +1,4 @@
-use crate::app::Shared;
+use crate::app::{ChatLine, Shared};
 use eframe::egui;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -32,6 +32,10 @@ struct Strings {
     approval_body: &'static str,
     approve: &'static str,
     deny: &'static str,
+    chat_title: &'static str,
+    chat_placeholder: &'static str,
+    chat_send: &'static str,
+    chat_empty: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -49,6 +53,10 @@ const EN: Strings = Strings {
     approval_body: "Someone is trying to connect to this computer. Allow it?",
     approve: "Allow",
     deny: "Deny",
+    chat_title: "Chat",
+    chat_placeholder: "Type a message…",
+    chat_send: "Send",
+    chat_empty: "No messages yet.",
 };
 
 const KO: Strings = Strings {
@@ -66,6 +74,10 @@ const KO: Strings = Strings {
     approval_body: "누군가 이 컴퓨터에 접속하려고 합니다. 허용할까요?",
     approve: "허용",
     deny: "거부",
+    chat_title: "채팅",
+    chat_placeholder: "메시지를 입력하세요…",
+    chat_send: "전송",
+    chat_empty: "아직 메시지가 없습니다.",
 };
 
 /// Small always-on host window: credentials, connection status, live view-only
@@ -317,7 +329,97 @@ impl eframe::App for HostUi {
                     self.shared.disconnect_all.store(true, Ordering::Relaxed);
                 }
             });
+
+        // Chat lives in its own always-on-top window near the screen bottom, so
+        // it stays reachable even when the main window is hidden or covered. It
+        // only exists while a viewer is connected.
+        if self.shared.chat_send.lock().unwrap().is_some() {
+            chat_window(ctx, &self.shared, self.s);
+        }
     }
+}
+
+/// Separate always-on-top chat window (an egui viewport), docked bottom-right.
+fn chat_window(ctx: &egui::Context, shared: &Shared, s: &'static Strings) {
+    let monitor = ctx.input(|i| i.viewport().monitor_size).unwrap_or(egui::vec2(1920.0, 1080.0));
+    let size = egui::vec2(360.0, 420.0);
+    let pos = egui::pos2(monitor.x - size.x - 24.0, monitor.y - size.y - 64.0);
+    let builder = egui::ViewportBuilder::default()
+        .with_title(s.chat_title)
+        .with_inner_size(size)
+        .with_min_inner_size([300.0, 280.0])
+        .with_position(pos)
+        .with_always_on_top();
+
+    let shared = shared.clone();
+    ctx.show_viewport_deferred(
+        egui::ViewportId::from_hash_of("host_chat"),
+        builder,
+        move |ctx, _class| {
+            ctx.request_repaint_after(Duration::from_millis(400));
+
+            // Input row: a viewport-level bottom panel with a fixed height. The
+            // text box and Send button are given the same explicit height and
+            // vertically centered, so nothing is clipped or misaligned.
+            egui::TopBottomPanel::bottom("chat_input_row")
+                .exact_height(58.0)
+                .frame(
+                    egui::Frame::none()
+                        .fill(egui::Color32::WHITE)
+                        .inner_margin(egui::Margin::symmetric(12.0, 0.0)),
+                )
+                .show(ctx, |ui| {
+                    let row_h = 32.0;
+                    let send_w = 58.0;
+                    ui.horizontal_centered(|ui| {
+                        let mut input = shared.chat_input.lock().unwrap();
+                        let field_w = (ui.available_width() - send_w - 8.0).max(60.0);
+                        let resp = ui.add_sized(
+                            [field_w, row_h],
+                            egui::TextEdit::singleline(&mut *input)
+                                .vertical_align(egui::Align::Center)
+                                .hint_text(s.chat_placeholder),
+                        );
+                        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let send = ui
+                            .add_sized([send_w, row_h], egui::Button::new(s.chat_send))
+                            .clicked();
+                        if (enter || send) && !input.trim().is_empty() {
+                            let text = input.trim().to_string();
+                            if let Some(tx) = shared.chat_send.lock().unwrap().as_ref() {
+                                let _ = tx.send(text);
+                            }
+                            input.clear();
+                            resp.request_focus();
+                        }
+                    });
+                });
+
+            // Transcript fills the space above the input row.
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::none()
+                        .fill(egui::Color32::WHITE)
+                        .inner_margin(egui::Margin::same(12.0)),
+                )
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .stick_to_bottom(true)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let log = shared.chat_log.lock().unwrap();
+                            if log.is_empty() {
+                                ui.label(egui::RichText::new(s.chat_empty).size(12.0).color(LABEL));
+                            } else {
+                                for line in log.iter() {
+                                    chat_bubble(ui, line);
+                                    ui.add_space(6.0);
+                                }
+                            }
+                        });
+                });
+        },
+    );
 }
 
 impl HostUi {
@@ -358,6 +460,31 @@ impl HostUi {
                 });
             });
     }
+}
+
+/// Render one chat message as a bubble: peer on the left, host on the right.
+fn chat_bubble(ui: &mut egui::Ui, line: &ChatLine) {
+    let max_w = (ui.available_width() * 0.72).max(80.0);
+    let (fill, text_col) = if line.from_me {
+        (ACCENT, egui::Color32::WHITE)
+    } else {
+        (egui::Color32::from_rgb(233, 236, 240), VALUE)
+    };
+    let layout = if line.from_me {
+        egui::Layout::right_to_left(egui::Align::Min)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Min)
+    };
+    ui.with_layout(layout, |ui| {
+        egui::Frame::none()
+            .fill(fill)
+            .rounding(egui::Rounding::same(10.0))
+            .inner_margin(egui::Margin::symmetric(10.0, 7.0))
+            .show(ui, |ui| {
+                ui.set_max_width(max_w);
+                ui.label(egui::RichText::new(&line.text).size(13.0).color(text_col));
+            });
+    });
 }
 
 /// A rounded light card container.
