@@ -52,6 +52,9 @@ pub struct Shared {
     /// The host's in-progress chat input (shared so the separate chat window,
     /// an egui viewport, can own it).
     pub chat_input: Arc<std::sync::Mutex<String>>,
+    /// Whether the chat window is currently shown. Closing it sets this false;
+    /// a new incoming message reopens it (notification-style).
+    pub chat_open: Arc<AtomicBool>,
 }
 
 /// One line in the host chat transcript.
@@ -366,6 +369,7 @@ async fn handle_event(
             {
                 let (chat_out_tx, mut chat_out_rx) = mpsc::unbounded_channel::<String>();
                 *shared.chat_send.lock().unwrap() = Some(chat_out_tx);
+                shared.chat_open.store(true, Ordering::Relaxed);
                 let chat_reply_tx = chat_reply_tx.clone();
                 let chat_log = shared.chat_log.clone();
                 tokio::spawn(async move {

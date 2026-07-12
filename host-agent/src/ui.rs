@@ -119,6 +119,7 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
                 tray,
                 tray_show,
                 tray_quit,
+                chat_seen_len: 0,
             }))
         }),
     )
@@ -228,6 +229,8 @@ struct HostUi {
     tray: Option<TrayIcon>,
     tray_show: Arc<AtomicBool>,
     tray_quit: Arc<AtomicBool>,
+    /// Chat transcript length last seen, to reopen the window on new messages.
+    chat_seen_len: usize,
 }
 
 impl eframe::App for HostUi {
@@ -332,9 +335,19 @@ impl eframe::App for HostUi {
 
         // Chat lives in its own always-on-top window near the screen bottom, so
         // it stays reachable even when the main window is hidden or covered. It
-        // only exists while a viewer is connected.
+        // exists only while a viewer is connected; closing it hides it until a
+        // new message arrives (notification-style).
         if self.shared.chat_send.lock().unwrap().is_some() {
-            chat_window(ctx, &self.shared, self.s);
+            let len = self.shared.chat_log.lock().unwrap().len();
+            if len > self.chat_seen_len {
+                self.shared.chat_open.store(true, Ordering::Relaxed);
+            }
+            self.chat_seen_len = len;
+            if self.shared.chat_open.load(Ordering::Relaxed) {
+                chat_window(ctx, &self.shared, self.s);
+            }
+        } else {
+            self.chat_seen_len = 0;
         }
     }
 }
@@ -349,6 +362,7 @@ fn chat_window(ctx: &egui::Context, shared: &Shared, s: &'static Strings) {
         .with_inner_size(size)
         .with_min_inner_size([300.0, 280.0])
         .with_position(pos)
+        .with_maximize_button(false)
         .with_always_on_top();
 
     let shared = shared.clone();
@@ -357,6 +371,12 @@ fn chat_window(ctx: &egui::Context, shared: &Shared, s: &'static Strings) {
         builder,
         move |ctx, _class| {
             ctx.request_repaint_after(Duration::from_millis(400));
+
+            // Close (X): stop showing the window. The main loop then stops
+            // recreating this viewport, so it actually closes.
+            if ctx.input(|i| i.viewport().close_requested()) {
+                shared.chat_open.store(false, Ordering::Relaxed);
+            }
 
             // Input row: a viewport-level bottom panel with a fixed height. The
             // text box and Send button are given the same explicit height and

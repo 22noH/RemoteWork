@@ -34,6 +34,7 @@ fn main() -> anyhow::Result<()> {
         chat_log: Arc::new(std::sync::Mutex::new(Vec::new())),
         chat_send: Arc::new(std::sync::Mutex::new(None)),
         chat_input: Arc::new(std::sync::Mutex::new(String::new())),
+        chat_open: Arc::new(AtomicBool::new(false)),
     };
 
     // The network stack is async; egui must own the main thread. Run tokio on a
