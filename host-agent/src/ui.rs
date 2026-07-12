@@ -1,4 +1,4 @@
-use crate::app::{ChatLine, Shared};
+use crate::app::{ChatLine, PendingFile, Shared};
 use eframe::egui;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -31,6 +31,9 @@ struct Strings {
     chat_send: &'static str,
     chat_empty: &'static str,
     chat_open_btn: &'static str,
+    file_title: &'static str,
+    file_body: &'static str,
+    file_accept: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -52,6 +55,9 @@ const EN: Strings = Strings {
     chat_send: "Send",
     chat_empty: "No messages yet.",
     chat_open_btn: "💬 Open chat",
+    file_title: "Incoming file",
+    file_body: "The viewer wants to send this file. Receive it?",
+    file_accept: "Receive",
 };
 
 const KO: Strings = Strings {
@@ -73,6 +79,9 @@ const KO: Strings = Strings {
     chat_send: "전송",
     chat_empty: "아직 메시지가 없습니다.",
     chat_open_btn: "💬 채팅 열기",
+    file_title: "파일 받기",
+    file_body: "상대가 이 파일을 보내려 합니다. 받으시겠습니까?",
+    file_accept: "받기",
 };
 
 /// Small always-on host window: credentials, connection status, live view-only
@@ -197,6 +206,13 @@ impl eframe::App for HostUi {
         // normal UI until the host decides.
         if self.shared.pending_approval.load(Ordering::Relaxed) {
             self.approval_prompt(ctx);
+            return;
+        }
+
+        // A file transfer is waiting for accept/deny.
+        let pending_file = self.shared.pending_file.lock().unwrap().clone();
+        if let Some(file) = pending_file {
+            self.file_prompt(ctx, &file);
             return;
         }
 
@@ -415,7 +431,64 @@ fn chat_window(ctx: &egui::Context, shared: &Shared, s: &'static Strings) {
     );
 }
 
+/// Human-readable byte size (e.g. "2.4 MB").
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 impl HostUi {
+    /// Full-window Receive/Deny prompt shown while a file awaits the host's OK.
+    fn file_prompt(&self, ctx: &egui::Context, file: &PendingFile) {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().inner_margin(egui::Margin::same(18.0)).fill(egui::Color32::WHITE))
+            .show(ctx, |ui| {
+                ui.add_space(20.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("📄").size(38.0));
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(self.s.file_title).size(18.0).strong().color(VALUE));
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new(&file.name).size(15.0).strong().color(VALUE));
+                    ui.label(egui::RichText::new(format_size(file.size)).size(12.0).color(LABEL));
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(self.s.file_body).size(12.0).color(LABEL));
+                });
+                ui.add_space(22.0);
+                ui.horizontal(|ui| {
+                    let w = (ui.available_width() - 8.0) / 2.0;
+                    let deny = egui::Button::new(
+                        egui::RichText::new(self.s.deny).color(egui::Color32::WHITE).size(14.0),
+                    )
+                    .fill(DANGER)
+                    .rounding(7.0)
+                    .min_size(egui::vec2(w, 40.0));
+                    if ui.add(deny).clicked() {
+                        self.shared.file_decision.store(2, Ordering::Relaxed);
+                    }
+                    let accept = egui::Button::new(
+                        egui::RichText::new(self.s.file_accept).color(egui::Color32::WHITE).size(14.0),
+                    )
+                    .fill(GREEN)
+                    .rounding(7.0)
+                    .min_size(egui::vec2(w, 40.0));
+                    if ui.add(accept).clicked() {
+                        self.shared.file_decision.store(1, Ordering::Relaxed);
+                    }
+                });
+            });
+    }
+
     /// Full-window Allow/Deny prompt shown while a connection awaits approval.
     fn approval_prompt(&self, ctx: &egui::Context) {
         egui::CentralPanel::default()

@@ -55,6 +55,46 @@ pub struct Shared {
     /// Whether the chat window is currently shown. Closing it sets this false;
     /// a new incoming message reopens it (notification-style).
     pub chat_open: Arc<AtomicBool>,
+    /// A file the viewer wants to send, awaiting the host's accept/deny.
+    pub pending_file: Arc<std::sync::Mutex<Option<PendingFile>>>,
+    /// Host's answer to a pending file: 0 = undecided, 1 = accept, 2 = deny.
+    pub file_decision: Arc<AtomicU8>,
+}
+
+/// A file transfer awaiting the host's approval.
+#[derive(Clone)]
+pub struct PendingFile {
+    pub name: String,
+    pub size: u64,
+}
+
+/// Block until the host accepts or denies an incoming file. Auto-denies after
+/// 30s so an ignored prompt can't wedge the transfer loop.
+async fn request_file_approval(shared: &Shared, name: String, size: u64) -> bool {
+    shared.file_decision.store(0, Ordering::Relaxed);
+    *shared.pending_file.lock().unwrap() = Some(PendingFile { name, size });
+    if let Some(ctx) = shared.ctx.get() {
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
+        ctx.request_repaint();
+    }
+    let mut waited = Duration::ZERO;
+    let decision = loop {
+        match shared.file_decision.load(Ordering::Relaxed) {
+            1 => break true,
+            2 => break false,
+            _ => {
+                if waited >= Duration::from_secs(30) {
+                    tracing::warn!("File request timed out — auto-denied");
+                    break false;
+                }
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                waited += Duration::from_millis(150);
+            }
+        }
+    };
+    *shared.pending_file.lock().unwrap() = None;
+    decision
 }
 
 /// One line in the host chat transcript.
@@ -412,6 +452,7 @@ async fn handle_event(
                 file_rx,
                 file_reply_tx.clone(),
                 config.allowed_dirs.clone(),
+                shared.clone(),
             ));
 
             // Audio channels
@@ -707,6 +748,7 @@ async fn run_file_loop(
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     reply_tx: mpsc::UnboundedSender<Vec<u8>>,
     allowed_dirs: Vec<std::path::PathBuf>,
+    shared: Shared,
 ) {
     use prost::Message;
     use proto::remote_work::{
@@ -725,6 +767,28 @@ async fn run_file_loop(
                         std::path::Path::new(&req.destination_path).join(&req.file_name);
                     match fs_access.validate_path(&dest) {
                         Ok(safe_path) => {
+                            // Ask the host before receiving the file (don't write
+                            // to disk silently).
+                            if !request_file_approval(
+                                &shared,
+                                req.file_name.clone(),
+                                req.file_size,
+                            )
+                            .await
+                            {
+                                tracing::info!(
+                                    "[FileTransfer] Declined by host: {}",
+                                    req.file_name
+                                );
+                                let reject = FileTransferMessage {
+                                    payload: Some(Payload::Reject(FileTransferReject {
+                                        transfer_id: req.transfer_id,
+                                        reason: "Declined by host".to_string(),
+                                    })),
+                                };
+                                let _ = reply_tx.send(reject.encode_to_vec());
+                                continue;
+                            }
                             tracing::info!(
                                 "[FileTransfer] Accept: {} ({} bytes)",
                                 req.file_name,
