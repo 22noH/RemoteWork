@@ -28,6 +28,10 @@ struct Strings {
     disconnect: &'static str,
     tray_open: &'static str,
     tray_quit: &'static str,
+    approval_title: &'static str,
+    approval_body: &'static str,
+    approve: &'static str,
+    deny: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -41,6 +45,10 @@ const EN: Strings = Strings {
     disconnect: "Disconnect all",
     tray_open: "Open",
     tray_quit: "Quit",
+    approval_title: "Connection request",
+    approval_body: "Someone is trying to connect to this computer. Allow it?",
+    approve: "Allow",
+    deny: "Deny",
 };
 
 const KO: Strings = Strings {
@@ -54,6 +62,10 @@ const KO: Strings = Strings {
     disconnect: "모두 연결 끊기",
     tray_open: "열기",
     tray_quit: "종료",
+    approval_title: "연결 요청",
+    approval_body: "누군가 이 컴퓨터에 접속하려고 합니다. 허용할까요?",
+    approve: "허용",
+    deny: "거부",
 };
 
 /// Small always-on host window: credentials, connection status, live view-only
@@ -72,6 +84,9 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
         options,
         Box::new(move |cc| {
             style(&cc.egui_ctx);
+            // Hand the context to the network thread so it can pop the window
+            // (from the tray) when a connection request needs approval.
+            let _ = shared.ctx.set(cc.egui_ctx.clone());
             // Korean UI only if the OS locale is Korean AND the bundled-with-Windows
             // Korean font loads (egui's default fonts have no CJK glyphs).
             let korean = locale_is_korean() && load_korean_font(&cc.egui_ctx);
@@ -224,6 +239,13 @@ impl eframe::App for HostUi {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
 
+        // A connection is waiting for approval — show the prompt instead of the
+        // normal UI until the host decides.
+        if self.shared.pending_approval.load(Ordering::Relaxed) {
+            self.approval_prompt(ctx);
+            return;
+        }
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none().inner_margin(egui::Margin::same(18.0)).fill(egui::Color32::WHITE))
             .show(ctx, |ui| {
@@ -294,6 +316,46 @@ impl eframe::App for HostUi {
                 if ui.add_enabled(count > 0, btn).clicked() {
                     self.shared.disconnect_all.store(true, Ordering::Relaxed);
                 }
+            });
+    }
+}
+
+impl HostUi {
+    /// Full-window Allow/Deny prompt shown while a connection awaits approval.
+    fn approval_prompt(&self, ctx: &egui::Context) {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().inner_margin(egui::Margin::same(18.0)).fill(egui::Color32::WHITE))
+            .show(ctx, |ui| {
+                ui.add_space(24.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("🔔").size(40.0));
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new(self.s.approval_title).size(18.0).strong().color(VALUE));
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(self.s.approval_body).size(13.0).color(LABEL));
+                });
+                ui.add_space(26.0);
+                ui.horizontal(|ui| {
+                    let w = (ui.available_width() - 8.0) / 2.0;
+                    let deny = egui::Button::new(
+                        egui::RichText::new(self.s.deny).color(egui::Color32::WHITE).size(14.0),
+                    )
+                    .fill(DANGER)
+                    .rounding(7.0)
+                    .min_size(egui::vec2(w, 40.0));
+                    if ui.add(deny).clicked() {
+                        self.shared.approval_decision.store(2, Ordering::Relaxed);
+                    }
+                    let allow = egui::Button::new(
+                        egui::RichText::new(self.s.approve).color(egui::Color32::WHITE).size(14.0),
+                    )
+                    .fill(GREEN)
+                    .rounding(7.0)
+                    .min_size(egui::vec2(w, 40.0));
+                    if ui.add(allow).clicked() {
+                        self.shared.approval_decision.store(1, Ordering::Relaxed);
+                    }
+                });
             });
     }
 }
