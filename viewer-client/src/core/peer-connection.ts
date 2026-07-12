@@ -122,6 +122,30 @@ export class RemotePeerConnection {
     // Set binary type to arraybuffer for consistent handling
     this.chatChannel.binaryType = 'arraybuffer'
     this.fileChannel.binaryType = 'arraybuffer'
+    this.controlChannel.binaryType = 'arraybuffer'
+
+    // Control channel: receive the monitor list, send monitor selection.
+    this.controlChannel.onopen = () => {
+      console.log('[PeerConnection] Control channel open')
+      useConnectionStore.getState().setSelectMonitor((index: number) => {
+        this.controlChannel?.send(JSON.stringify({ type: 'select_monitor', index }))
+      })
+    }
+    this.controlChannel.onmessage = (e) => {
+      try {
+        const text =
+          typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data)
+        const msg = JSON.parse(text)
+        if (msg.type === 'monitors' && Array.isArray(msg.list)) {
+          useConnectionStore.getState().setMonitors(msg.list, msg.selected ?? 0)
+        }
+      } catch (err) {
+        console.warn('[PeerConnection] Bad control message:', err)
+      }
+    }
+    this.controlChannel.onclose = () => {
+      useConnectionStore.getState().setSelectMonitor(null)
+    }
 
     // Input channel lifecycle
     this.inputChannel.onopen = () => {

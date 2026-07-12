@@ -11,6 +11,14 @@ export type ConnectionState =
 
 export type DisconnectReason = 'timeout' | 'host_closed' | 'network' | 'user' | 'idle_timeout' | null
 
+export interface MonitorInfo {
+  index: number
+  name: string
+  width: number
+  height: number
+  primary: boolean
+}
+
 // Idle timeout: 5 minutes of no input → warning at 30s before expiry
 export const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 export const IDLE_WARNING_MS = IDLE_TIMEOUT_MS - 30 * 1000
@@ -33,7 +41,13 @@ interface ConnectionStore {
   disconnectReason: DisconnectReason
   lastInputAt: number | null
   idleWarning: boolean
+  monitors: MonitorInfo[]
+  selectedMonitor: number
+  selectMonitor: ((index: number) => void) | null
 
+  setMonitors: (monitors: MonitorInfo[], selected: number) => void
+  setSelectedMonitor: (index: number) => void
+  setSelectMonitor: (fn: ((index: number) => void) | null) => void
   setConnectionState: (state: ConnectionState) => void
   setSessionToken: (token: string) => void
   setHostId: (id: string) => void
@@ -70,7 +84,13 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
   disconnectReason: null,
   lastInputAt: null,
   idleWarning: false,
+  monitors: [],
+  selectedMonitor: 0,
+  selectMonitor: null,
 
+  setMonitors: (monitors, selected) => set({ monitors, selectedMonitor: selected }),
+  setSelectedMonitor: (index) => set({ selectedMonitor: index }),
+  setSelectMonitor: (fn) => set({ selectMonitor: fn }),
   setConnectionState: (state) =>
     set((prev) => ({
       connectionState: state,
@@ -118,6 +138,9 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
       disconnectReason: 'user',
       lastInputAt: null,
       idleWarning: false,
+      monitors: [],
+      selectedMonitor: 0,
+      selectMonitor: null,
     })
   },
 }))

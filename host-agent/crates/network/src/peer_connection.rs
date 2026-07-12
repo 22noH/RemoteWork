@@ -29,6 +29,10 @@ pub struct DataChannelHandlers {
     pub file_tx: mpsc::UnboundedSender<Vec<u8>>,
     pub file_reply_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     pub audio_rx_tx: mpsc::UnboundedSender<Vec<u8>>,
+    /// Incoming control messages (e.g. monitor selection) from the viewer.
+    pub control_tx: mpsc::UnboundedSender<Vec<u8>>,
+    /// Bytes sent to the viewer when the control channel opens (monitor list).
+    pub control_hello: Vec<u8>,
 }
 
 pub struct HostPeerConnection {
@@ -162,6 +166,8 @@ impl HostPeerConnection {
             let input_tx = handlers.input_tx.clone();
             let chat_tx = handlers.chat_tx.clone();
             let file_tx = handlers.file_tx.clone();
+            let control_tx = handlers.control_tx.clone();
+            let control_hello = Arc::new(handlers.control_hello.clone());
 
             // Wrap receivers in Arc<Mutex<Option<...>>> so we can .take() them once
             let chat_reply_rx = Arc::new(Mutex::new(Some(handlers.chat_reply_rx)));
@@ -171,6 +177,8 @@ impl HostPeerConnection {
                 let input_tx = input_tx.clone();
                 let chat_tx = chat_tx.clone();
                 let file_tx = file_tx.clone();
+                let control_tx = control_tx.clone();
+                let control_hello = Arc::clone(&control_hello);
                 let chat_reply_rx = Arc::clone(&chat_reply_rx);
                 let file_reply_rx = Arc::clone(&file_reply_rx);
 
@@ -241,6 +249,31 @@ impl HostPeerConnection {
                                             }
                                         });
                                     }
+                                })
+                            }));
+                        }
+                        "control" => {
+                            tracing::info!("Control data channel opened");
+                            let dc_send = Arc::clone(&dc);
+                            // Send the monitor list to the viewer on open.
+                            dc.on_open(Box::new(move || {
+                                let dc_send = dc_send.clone();
+                                let hello = control_hello.clone();
+                                Box::pin(async move {
+                                    if !hello.is_empty() {
+                                        if let Err(e) =
+                                            dc_send.send(&bytes::Bytes::from((*hello).clone())).await
+                                        {
+                                            tracing::warn!("Control hello send error: {}", e);
+                                        }
+                                    }
+                                })
+                            }));
+                            // Forward incoming control messages (monitor selection).
+                            dc.on_message(Box::new(move |msg: DataChannelMessage| {
+                                let control_tx = control_tx.clone();
+                                Box::pin(async move {
+                                    let _ = control_tx.send(msg.data.to_vec());
                                 })
                             }));
                         }

@@ -7,11 +7,15 @@ pub fn move_mouse(
     enigo: &mut Enigo,
     x: f32,
     y: f32,
+    offset_x: i32,
+    offset_y: i32,
     screen_width: u32,
     screen_height: u32,
 ) -> Result<()> {
-    let abs_x = (x * screen_width as f32) as i32;
-    let abs_y = (y * screen_height as f32) as i32;
+    // Normalized coords are relative to the captured monitor; add its
+    // virtual-desktop offset so enigo's absolute move lands on that monitor.
+    let abs_x = offset_x + (x * screen_width as f32) as i32;
+    let abs_y = offset_y + (y * screen_height as f32) as i32;
     enigo.move_mouse(abs_x, abs_y, Coordinate::Abs)?;
     Ok(())
 }

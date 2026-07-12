@@ -298,10 +298,21 @@ async fn handle_event(
             }
             tracing::info!("Connection approved — processing SDP offer for {}", session_token);
 
-            // Get screen dimensions for input coordinate mapping
-            let (screen_width, screen_height) = capture::Capturer::new()
-                .map(|c| (c.width(), c.height()))
-                .unwrap_or((1920, 1080));
+            // Enumerate monitors; capture the primary by default. The viewer can
+            // switch monitors over the "control" channel.
+            let monitors = capture::Capturer::list().unwrap_or_default();
+            let primary_idx = capture::Capturer::primary_index().unwrap_or(0);
+            let selected_monitor = Arc::new(AtomicUsize::new(primary_idx));
+            let geom = {
+                let m = monitors.get(primary_idx);
+                Arc::new(std::sync::Mutex::new(input::MonitorGeom {
+                    x: m.map(|m| m.x).unwrap_or(0),
+                    y: m.map(|m| m.y).unwrap_or(0),
+                    width: m.map(|m| m.width).unwrap_or(1920),
+                    height: m.map(|m| m.height).unwrap_or(1080),
+                }))
+            };
+            let control_hello = monitors_json(&monitors, primary_idx);
 
             let (ice_tx, mut ice_rx) = mpsc::unbounded_channel::<(String, String, i32)>();
 
@@ -309,9 +320,16 @@ async fn handle_event(
             let (input_tx, input_rx) = mpsc::unbounded_channel::<Vec<u8>>();
             tokio::spawn(run_input_loop(
                 input_rx,
-                screen_width,
-                screen_height,
+                geom.clone(),
                 shared.allow_control.clone(),
+            ));
+
+            // Control channel: viewer → monitor selection.
+            let (control_tx, control_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+            tokio::spawn(run_control_loop(
+                control_rx,
+                selected_monitor.clone(),
+                geom.clone(),
             ));
 
             // Chat channels
@@ -338,6 +356,8 @@ async fn handle_event(
                 file_tx,
                 file_reply_rx,
                 audio_rx_tx,
+                control_tx,
+                control_hello,
             };
 
             let pc = match HostPeerConnection::new(config.stun_servers.clone(), ice_tx, handlers).await {
@@ -377,7 +397,7 @@ async fn handle_event(
             // Video capture
             let video_track = pc.video_track();
             let (capture_stop_tx, capture_stop_rx) = broadcast::channel::<()>(1);
-            tokio::spawn(capture_loop(video_track, capture_stop_rx));
+            tokio::spawn(capture_loop(video_track, capture_stop_rx, selected_monitor.clone()));
 
             // Audio capture: encode local mic and send via WebRTC audio track
             let audio_track = pc.audio_track();
@@ -480,11 +500,10 @@ async fn handle_event(
 /// channel and dispatches them to the local `InputHandler` (enigo).
 async fn run_input_loop(
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
-    screen_width: u32,
-    screen_height: u32,
+    geom: Arc<std::sync::Mutex<input::MonitorGeom>>,
     allow_control: Arc<AtomicBool>,
 ) {
-    let mut handler = match InputHandler::new(screen_width, screen_height) {
+    let mut handler = match InputHandler::new(geom) {
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Failed to create InputHandler: {}", e);
@@ -492,11 +511,7 @@ async fn run_input_loop(
         }
     };
 
-    tracing::info!(
-        "Input loop started (screen {}x{})",
-        screen_width,
-        screen_height
-    );
+    tracing::info!("Input loop started");
 
     while let Some(bytes) = rx.recv().await {
         // Live view-only gate: when control is disabled, drop the event.
@@ -514,6 +529,68 @@ async fn run_input_loop(
     }
 
     tracing::info!("Input loop stopped");
+}
+
+// ---------------------------------------------------------------------------
+// Monitor control loop (viewer picks which monitor to view)
+// ---------------------------------------------------------------------------
+
+/// Serialize the monitor list for the viewer's picker.
+fn monitors_json(monitors: &[capture::MonitorInfo], selected: usize) -> Vec<u8> {
+    let list: Vec<serde_json::Value> = monitors
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "index": m.index,
+                "name": m.name,
+                "width": m.width,
+                "height": m.height,
+                "primary": m.is_primary,
+            })
+        })
+        .collect();
+    serde_json::to_vec(&serde_json::json!({
+        "type": "monitors",
+        "list": list,
+        "selected": selected,
+    }))
+    .unwrap_or_default()
+}
+
+/// Apply monitor-selection messages from the viewer: update the shared selected
+/// index (the capture loop rebuilds) and the input-mapping geometry.
+async fn run_control_loop(
+    mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    selected: Arc<AtomicUsize>,
+    geom: Arc<std::sync::Mutex<input::MonitorGeom>>,
+) {
+    while let Some(bytes) = rx.recv().await {
+        let msg: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if msg["type"] == "select_monitor" {
+            if let Some(index) = msg["index"].as_u64().map(|i| i as usize) {
+                match capture::Capturer::list() {
+                    Ok(monitors) => {
+                        if let Some(m) = monitors.get(index) {
+                            *geom.lock().unwrap() = input::MonitorGeom {
+                                x: m.x,
+                                y: m.y,
+                                width: m.width,
+                                height: m.height,
+                            };
+                            selected.store(index, Ordering::Relaxed);
+                            tracing::info!("Viewer selected monitor {}", index);
+                        } else {
+                            tracing::warn!("Viewer selected out-of-range monitor {}", index);
+                        }
+                    }
+                    Err(e) => tracing::warn!("Failed to list monitors: {}", e),
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -667,6 +744,7 @@ async fn run_file_loop(
 async fn capture_loop(
     video_track: Arc<TrackLocalStaticSample>,
     mut stop_rx: broadcast::Receiver<()>,
+    selected_monitor: Arc<AtomicUsize>,
 ) {
     // The screen capturer (xcap) and VP8 encoder (vpx) hold raw pointers and
     // are therefore not `Send`. Keep them on a dedicated OS thread so this
@@ -677,35 +755,46 @@ async fn capture_loop(
     let thread_stop = Arc::clone(&stop_flag);
 
     std::thread::spawn(move || {
-        let capturer = match capture::Capturer::new() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("Failed to initialise screen capturer: {}", e);
-                return;
-            }
-        };
-
-        let width = capturer.width();
-        let height = capturer.height();
-
-        let mut encoder = match capture::Encoder::new(width, height, 30, 2000) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::error!("Failed to initialise VP8 encoder: {}", e);
-                return;
-            }
-        };
-
-        tracing::info!(
-            "Capture loop started ({}x{} @ 30 fps, 2 Mbps VP8)",
-            width,
-            height
-        );
-
         let frame_duration = Duration::from_millis(33);
+        // Rebuilt whenever the viewer switches monitors (usize::MAX forces the
+        // first build). Monitor resolutions differ, so the VP8 encoder — which
+        // is fixed-size — is rebuilt alongside the capturer.
+        let mut current = usize::MAX;
+        let mut capturer: Option<capture::Capturer> = None;
+        let mut encoder: Option<capture::Encoder> = None;
 
         while !thread_stop.load(Ordering::Relaxed) {
-            let frame = match capturer.capture_frame() {
+            let want = selected_monitor.load(Ordering::Relaxed);
+            if want != current || capturer.is_none() {
+                match capture::Capturer::for_index(want) {
+                    Ok(c) => {
+                        let (w, h) = (c.width(), c.height());
+                        match capture::Encoder::new(w, h, 30, 2000) {
+                            Ok(e) => {
+                                capturer = Some(c);
+                                encoder = Some(e);
+                                current = want;
+                                tracing::info!("Capturing monitor {} ({}x{} @ 30fps VP8)", want, w, h);
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to init VP8 encoder: {}", e);
+                                std::thread::sleep(frame_duration);
+                                continue;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to init capturer for monitor {}: {}", want, e);
+                        std::thread::sleep(frame_duration);
+                        continue;
+                    }
+                }
+            }
+
+            let cap = capturer.as_ref().unwrap();
+            let enc = encoder.as_mut().unwrap();
+
+            let frame = match cap.capture_frame() {
                 Ok(f) => f,
                 Err(e) => {
                     tracing::warn!("Capture failed: {}", e);
@@ -714,7 +803,7 @@ async fn capture_loop(
                 }
             };
 
-            let encoded_frames = match encoder.encode(&frame) {
+            let encoded_frames = match enc.encode(&frame) {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::warn!("Encode failed: {}", e);

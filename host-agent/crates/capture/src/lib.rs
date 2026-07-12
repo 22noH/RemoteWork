@@ -2,7 +2,7 @@ pub mod capturer;
 pub mod encoder;
 pub mod frame;
 
-pub use capturer::Capturer;
+pub use capturer::{Capturer, MonitorInfo};
 pub use encoder::Encoder;
 pub use frame::Frame;
 
