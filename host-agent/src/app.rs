@@ -52,6 +52,9 @@ pub struct Shared {
     /// The host's in-progress chat input (shared so the separate chat window,
     /// an egui viewport, can own it).
     pub chat_input: Arc<std::sync::Mutex<String>>,
+    /// Whether the chat window is currently shown. Closing it sets this false;
+    /// a new incoming message reopens it (notification-style).
+    pub chat_open: Arc<AtomicBool>,
 }
 
 /// One line in the host chat transcript.
@@ -315,6 +318,21 @@ async fn handle_event(
         SignalingEvent::SdpOffer { sdp, session_token } => {
             tracing::info!("Connection request for session {}", session_token);
 
+            // 1:1 only — reject a second viewer while one is already connected.
+            // A host that lets multiple viewers in at once is an easy way to
+            // lose control of the machine.
+            let busy = sessions.values().any(|s| {
+                use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState as St;
+                !matches!(s.pc.connection_state(), St::Failed | St::Closed)
+            });
+            if busy {
+                tracing::warn!(
+                    "Rejecting {} — a viewer is already connected (1:1 only)",
+                    session_token
+                );
+                return;
+            }
+
             // Require the host to approve before accepting the connection.
             if !request_approval(shared).await {
                 tracing::info!("Connection denied by host for session {}", session_token);
@@ -359,13 +377,14 @@ async fn handle_event(
             // Chat channels
             let (chat_tx, chat_rx) = mpsc::unbounded_channel::<Vec<u8>>();
             let (chat_reply_tx, chat_reply_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-            tokio::spawn(run_chat_loop(chat_rx, shared.chat_log.clone()));
+            tokio::spawn(run_chat_loop(chat_rx, shared.clone()));
 
             // Host → viewer chat: the UI pushes text; encode it, forward to the
             // viewer over the reply channel, and echo it into the transcript.
             {
                 let (chat_out_tx, mut chat_out_rx) = mpsc::unbounded_channel::<String>();
                 *shared.chat_send.lock().unwrap() = Some(chat_out_tx);
+                shared.chat_open.store(true, Ordering::Relaxed);
                 let chat_reply_tx = chat_reply_tx.clone();
                 let chat_log = shared.chat_log.clone();
                 tokio::spawn(async move {
@@ -646,12 +665,10 @@ async fn run_control_loop(
 // Chat processing loop
 // ---------------------------------------------------------------------------
 
-async fn run_chat_loop(
-    mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
-    chat_log: Arc<std::sync::Mutex<Vec<ChatLine>>>,
-) {
+async fn run_chat_loop(mut rx: mpsc::UnboundedReceiver<Vec<u8>>, shared: Shared) {
     use prost::Message;
     use proto::remote_work::ChatEnvelope;
+    let chat_log = &shared.chat_log;
 
     while let Some(bytes) = rx.recv().await {
         match ChatEnvelope::decode(bytes.as_slice()) {
@@ -660,7 +677,12 @@ async fn run_chat_loop(
                 match envelope.payload {
                     Some(Payload::Message(msg)) => {
                         tracing::info!("[Chat] {}: {}", msg.sender, msg.content);
-                        push_chat(&chat_log, ChatLine { from_me: false, text: msg.content });
+                        push_chat(chat_log, ChatLine { from_me: false, text: msg.content });
+                        // Reopen the chat window (notification-style) and wake the UI.
+                        shared.chat_open.store(true, Ordering::Relaxed);
+                        if let Some(ctx) = shared.ctx.get() {
+                            ctx.request_repaint();
+                        }
                     }
                     Some(Payload::Typing(t)) => {
                         tracing::debug!(

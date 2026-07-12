@@ -56,7 +56,16 @@ impl HostPeerConnection {
         let mut m = MediaEngine::default();
         m.register_default_codecs()?;
 
-        let api = APIBuilder::new().with_media_engine(m).build();
+        // Disable mDNS ICE gathering. On networks without working multicast it
+        // spams the log with "Failed to send mDNS packet (os error 10065)", and
+        // we don't need .local candidate privacy here.
+        let mut setting_engine = webrtc::api::setting_engine::SettingEngine::default();
+        setting_engine.set_ice_multicast_dns_mode(webrtc::ice::mdns::MulticastDnsMode::Disabled);
+
+        let api = APIBuilder::new()
+            .with_media_engine(m)
+            .with_setting_engine(setting_engine)
+            .build();
 
         let config = RTCConfiguration {
             ice_servers: vec![RTCIceServer {
