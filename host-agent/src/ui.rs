@@ -36,6 +36,7 @@ struct Strings {
     chat_placeholder: &'static str,
     chat_send: &'static str,
     chat_empty: &'static str,
+    chat_open_btn: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -57,6 +58,7 @@ const EN: Strings = Strings {
     chat_placeholder: "Type a message…",
     chat_send: "Send",
     chat_empty: "No messages yet.",
+    chat_open_btn: "💬 Open chat",
 };
 
 const KO: Strings = Strings {
@@ -78,6 +80,7 @@ const KO: Strings = Strings {
     chat_placeholder: "메시지를 입력하세요…",
     chat_send: "전송",
     chat_empty: "아직 메시지가 없습니다.",
+    chat_open_btn: "💬 채팅 열기",
 };
 
 /// Small always-on host window: credentials, connection status, live view-only
@@ -86,8 +89,8 @@ const KO: Strings = Strings {
 pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([380.0, 470.0])
-            .with_min_inner_size([380.0, 470.0])
+            .with_inner_size([380.0, 530.0])
+            .with_min_inner_size([380.0, 530.0])
             .with_resizable(false),
         ..Default::default()
     };
@@ -193,10 +196,15 @@ fn build_tray(
     std::thread::spawn(move || {
         let rx = MenuEvent::receiver();
         while let Ok(event) = rx.recv() {
+            // Drive the viewport directly from here — the window may be hidden in
+            // the tray, in which case update() isn't running to poll the flags.
             if event.id == quit_id {
                 quit.store(true, Ordering::Relaxed);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             } else if event.id == open_id {
                 show.store(true, Ordering::Relaxed);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
             ctx.request_repaint();
         }
@@ -320,8 +328,24 @@ impl eframe::App for HostUi {
                     });
                 });
 
+                // Open the chat window (host can start a conversation, or reopen
+                // it after closing).
+                if count > 0 {
+                    ui.add_space(12.0);
+                    let chat_btn = egui::Button::new(
+                        egui::RichText::new(self.s.chat_open_btn).color(ACCENT).size(13.0),
+                    )
+                    .fill(egui::Color32::from_rgb(235, 242, 255))
+                    .stroke(egui::Stroke::new(1.0, ACCENT))
+                    .rounding(7.0)
+                    .min_size(egui::vec2(ui.available_width(), 32.0));
+                    if ui.add(chat_btn).clicked() {
+                        self.shared.chat_open.store(true, Ordering::Relaxed);
+                    }
+                }
+
                 // Bottom: disconnect
-                ui.add_space(16.0);
+                ui.add_space(12.0);
                 let btn = egui::Button::new(
                     egui::RichText::new(self.s.disconnect).color(egui::Color32::WHITE).size(13.0),
                 )
