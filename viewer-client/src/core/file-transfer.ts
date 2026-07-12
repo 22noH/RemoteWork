@@ -43,7 +43,7 @@ const CHUNK_SIZE = 64 * 1024 // 64 KB
 function encodeMsg(payload: object): ArrayBuffer {
   const msg = FileTransferMessageType.create(payload)
   const buf = FileTransferMessageType.encode(msg).finish()
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
 }
 
 async function sha256Hex(data: ArrayBuffer): Promise<string> {

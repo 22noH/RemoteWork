@@ -93,6 +93,11 @@ export class RemotePeerConnection {
   async createOffer(sessionToken: string): Promise<void> {
     this.sessionToken = sessionToken
 
+    // Receive the host's screen video. The host is the sender/answerer, so the
+    // offer must carry a recvonly video m-line or the track is never negotiated
+    // (ontrack never fires and the screen stays black).
+    this.pc.addTransceiver('video', { direction: 'recvonly' })
+
     // Request microphone (non-blocking, don't fail if denied)
     try {
       const audioStream = await navigator.mediaDevices.getUserMedia({
