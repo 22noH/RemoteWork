@@ -34,6 +34,7 @@ struct Strings {
     file_title: &'static str,
     file_body: &'static str,
     file_accept: &'static str,
+    file_saves_to: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -58,6 +59,7 @@ const EN: Strings = Strings {
     file_title: "Incoming file",
     file_body: "The viewer wants to send this file. Receive it?",
     file_accept: "Receive",
+    file_saves_to: "Saves to",
 };
 
 const KO: Strings = Strings {
@@ -82,6 +84,7 @@ const KO: Strings = Strings {
     file_title: "파일 받기",
     file_body: "상대가 이 파일을 보내려 합니다. 받으시겠습니까?",
     file_accept: "받기",
+    file_saves_to: "저장 위치",
 };
 
 /// Small always-on host window: credentials, connection status, live view-only
@@ -119,7 +122,6 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
                 shared,
                 korean,
                 s,
-                chat_seen_len: 0,
                 quitting: false,
             }))
         }),
@@ -185,8 +187,6 @@ struct HostUi {
     shared: Shared,
     korean: bool,
     s: &'static Strings,
-    /// Chat transcript length last seen, to reopen the window on new messages.
-    chat_seen_len: usize,
     /// Set by the Quit button so the close request is allowed through.
     quitting: bool,
 }
@@ -213,6 +213,16 @@ impl eframe::App for HostUi {
         let pending_file = self.shared.pending_file.lock().unwrap().clone();
         if let Some(file) = pending_file {
             self.file_prompt(ctx, &file);
+            return;
+        }
+
+        // Chat is a screen within this window (not a separate window), reached
+        // via "Open chat" or auto-opened on a new message. Only while connected.
+        let connected = self.shared.chat_send.lock().unwrap().is_some();
+        if !connected {
+            self.shared.chat_open.store(false, Ordering::Relaxed);
+        } else if self.shared.chat_open.load(Ordering::Relaxed) {
+            self.chat_screen(ctx);
             return;
         }
 
@@ -321,114 +331,81 @@ impl eframe::App for HostUi {
                     }
                 });
             });
-
-        // Chat lives in its own always-on-top window near the screen bottom, so
-        // it stays reachable even when the main window is hidden or covered. It
-        // exists only while a viewer is connected; closing it hides it until a
-        // new message arrives (notification-style).
-        if self.shared.chat_send.lock().unwrap().is_some() {
-            let len = self.shared.chat_log.lock().unwrap().len();
-            if len > self.chat_seen_len {
-                self.shared.chat_open.store(true, Ordering::Relaxed);
-            }
-            self.chat_seen_len = len;
-            if self.shared.chat_open.load(Ordering::Relaxed) {
-                chat_window(ctx, &self.shared, self.s);
-            }
-        } else {
-            self.chat_seen_len = 0;
-        }
     }
 }
 
-/// Separate always-on-top chat window (an egui viewport), docked bottom-right.
-fn chat_window(ctx: &egui::Context, shared: &Shared, s: &'static Strings) {
-    let monitor = ctx.input(|i| i.viewport().monitor_size).unwrap_or(egui::vec2(1920.0, 1080.0));
-    let size = egui::vec2(360.0, 420.0);
-    let pos = egui::pos2(monitor.x - size.x - 24.0, monitor.y - size.y - 64.0);
-    let builder = egui::ViewportBuilder::default()
-        .with_title(s.chat_title)
-        .with_inner_size(size)
-        .with_min_inner_size([300.0, 280.0])
-        .with_position(pos)
-        .with_maximize_button(false)
-        .with_always_on_top();
+impl HostUi {
+    /// The chat screen (shown within the main window, not a separate window):
+    /// a back button, the transcript, and an input row pinned to the bottom.
+    fn chat_screen(&self, ctx: &egui::Context) {
+        let shared = &self.shared;
+        let s = self.s;
 
-    let shared = shared.clone();
-    ctx.show_viewport_deferred(
-        egui::ViewportId::from_hash_of("host_chat"),
-        builder,
-        move |ctx, _class| {
-            ctx.request_repaint_after(Duration::from_millis(400));
+        // Top bar with a back button.
+        egui::TopBottomPanel::top("chat_top")
+            .frame(egui::Frame::none().fill(egui::Color32::WHITE).inner_margin(egui::Margin::symmetric(10.0, 8.0)))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(egui::Button::new(egui::RichText::new("←").size(20.0).color(ACCENT)).frame(false))
+                        .clicked()
+                    {
+                        shared.chat_open.store(false, Ordering::Relaxed);
+                    }
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(s.chat_title).size(15.0).strong().color(VALUE));
+                });
+            });
 
-            // Close (X): stop showing the window. The main loop then stops
-            // recreating this viewport, so it actually closes.
-            if ctx.input(|i| i.viewport().close_requested()) {
-                shared.chat_open.store(false, Ordering::Relaxed);
-            }
+        // Input row pinned to the bottom, fixed height so nothing is clipped.
+        egui::TopBottomPanel::bottom("chat_input_row")
+            .exact_height(58.0)
+            .frame(egui::Frame::none().fill(egui::Color32::WHITE).inner_margin(egui::Margin::symmetric(12.0, 0.0)))
+            .show(ctx, |ui| {
+                let row_h = 32.0;
+                let send_w = 58.0;
+                ui.horizontal_centered(|ui| {
+                    let mut input = shared.chat_input.lock().unwrap();
+                    let field_w = (ui.available_width() - send_w - 8.0).max(60.0);
+                    let resp = ui.add_sized(
+                        [field_w, row_h],
+                        egui::TextEdit::singleline(&mut *input)
+                            .vertical_align(egui::Align::Center)
+                            .hint_text(s.chat_placeholder),
+                    );
+                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let send = ui.add_sized([send_w, row_h], egui::Button::new(s.chat_send)).clicked();
+                    if (enter || send) && !input.trim().is_empty() {
+                        let text = input.trim().to_string();
+                        if let Some(tx) = shared.chat_send.lock().unwrap().as_ref() {
+                            let _ = tx.send(text);
+                        }
+                        input.clear();
+                        resp.request_focus();
+                    }
+                });
+            });
 
-            // Input row: a viewport-level bottom panel with a fixed height. The
-            // text box and Send button are given the same explicit height and
-            // vertically centered, so nothing is clipped or misaligned.
-            egui::TopBottomPanel::bottom("chat_input_row")
-                .exact_height(58.0)
-                .frame(
-                    egui::Frame::none()
-                        .fill(egui::Color32::WHITE)
-                        .inner_margin(egui::Margin::symmetric(12.0, 0.0)),
-                )
-                .show(ctx, |ui| {
-                    let row_h = 32.0;
-                    let send_w = 58.0;
-                    ui.horizontal_centered(|ui| {
-                        let mut input = shared.chat_input.lock().unwrap();
-                        let field_w = (ui.available_width() - send_w - 8.0).max(60.0);
-                        let resp = ui.add_sized(
-                            [field_w, row_h],
-                            egui::TextEdit::singleline(&mut *input)
-                                .vertical_align(egui::Align::Center)
-                                .hint_text(s.chat_placeholder),
-                        );
-                        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        let send = ui
-                            .add_sized([send_w, row_h], egui::Button::new(s.chat_send))
-                            .clicked();
-                        if (enter || send) && !input.trim().is_empty() {
-                            let text = input.trim().to_string();
-                            if let Some(tx) = shared.chat_send.lock().unwrap().as_ref() {
-                                let _ = tx.send(text);
+        // Transcript fills the space between the bars.
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(egui::Color32::WHITE).inner_margin(egui::Margin::same(12.0)))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let log = shared.chat_log.lock().unwrap();
+                        if log.is_empty() {
+                            ui.label(egui::RichText::new(s.chat_empty).size(12.0).color(LABEL));
+                        } else {
+                            for line in log.iter() {
+                                chat_bubble(ui, line);
+                                ui.add_space(6.0);
                             }
-                            input.clear();
-                            resp.request_focus();
                         }
                     });
-                });
-
-            // Transcript fills the space above the input row.
-            egui::CentralPanel::default()
-                .frame(
-                    egui::Frame::none()
-                        .fill(egui::Color32::WHITE)
-                        .inner_margin(egui::Margin::same(12.0)),
-                )
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .stick_to_bottom(true)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let log = shared.chat_log.lock().unwrap();
-                            if log.is_empty() {
-                                ui.label(egui::RichText::new(s.chat_empty).size(12.0).color(LABEL));
-                            } else {
-                                for line in log.iter() {
-                                    chat_bubble(ui, line);
-                                    ui.add_space(6.0);
-                                }
-                            }
-                        });
-                });
-        },
-    );
+            });
+    }
 }
 
 /// Human-readable byte size (e.g. "2.4 MB").
@@ -463,6 +440,12 @@ impl HostUi {
                     ui.label(egui::RichText::new(format_size(file.size)).size(12.0).color(LABEL));
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new(self.s.file_body).size(12.0).color(LABEL));
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!("{}: {}", self.s.file_saves_to, file.dest_dir))
+                            .size(10.0)
+                            .color(LABEL),
+                    );
                 });
                 ui.add_space(22.0);
                 ui.horizontal(|ui| {
