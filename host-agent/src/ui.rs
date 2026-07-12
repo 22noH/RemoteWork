@@ -83,7 +83,12 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([380.0, 590.0])
             .with_min_inner_size([380.0, 590.0])
-            .with_resizable(false),
+            .with_resizable(false)
+            // Fixed-size window: maximize is pointless, and closing (X) already
+            // minimizes to the taskbar, so a separate minimize button is
+            // redundant. Leave just the close button.
+            .with_maximize_button(false)
+            .with_minimize_button(false),
         ..Default::default()
     };
     eframe::run_native(
