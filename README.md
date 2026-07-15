@@ -60,7 +60,6 @@ cd viewer-client && npm run electron:dev
 | [`docs/03_SUBAGENT_STRATEGY.md`](docs/03_SUBAGENT_STRATEGY.md) | AI 서브에이전트 운용 전략 |
 | [`docs/04_SETUP_AND_BUILD.md`](docs/04_SETUP_AND_BUILD.md) | 개발 환경 설정 및 빌드 가이드 |
 | [`deploy/README.md`](deploy/README.md) | 프로덕션 배포 가이드 (nginx + TLS + certbot, 선택적 TURN) |
-| [`architecture/architecture.md`](architecture/architecture.md) | 시스템 아키텍처 |
 
 ## 개발 현황
 
