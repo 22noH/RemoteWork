@@ -1,0 +1,16 @@
+# Build the viewer and serve it with nginx (which also reverse-proxies WSS to
+# the signaling server and terminates TLS). Build context is the repo root.
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY viewer-client/package.json viewer-client/package-lock.json ./
+RUN npm ci
+COPY viewer-client/ ./
+# No VITE_SIGNALING_URL: the viewer targets wss://<its own host>/signal at
+# runtime, so this image works for any domain without rebuilding.
+RUN npm run build
+
+FROM nginx:alpine
+# nginx:alpine renders templates in /etc/nginx/templates with envsubst, filling
+# in ${DOMAIN} from the container environment on startup.
+COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /app/dist /usr/share/nginx/html
