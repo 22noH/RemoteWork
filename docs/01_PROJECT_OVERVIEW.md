@@ -33,9 +33,9 @@ Remote_Work/
 ├── host-agent/                   # Rust 호스트 에이전트 (Cargo workspace)
 │   ├── src/
 │   │   ├── main.rs               # 진입점, tracing 초기화
-│   │   ├── app.rs                # 이벤트 루프, 세션 관리, 캡처 파이프라인
-│   │   ├── config.rs             # JSON 설정 파일 (host_id, password, stun)
-│   │   └── tray.rs               # 시스템 트레이 (아이콘, ID 표시, 연결 끊기)
+│   │   ├── app.rs                # 이벤트 루프, 연결 승인/1:1/뷰 전용/모니터 선택/채팅/파일(→다운로드)
+│   │   ├── config.rs             # JSON 설정 파일 (host_id, stun, turn, allow_control)
+│   │   └── ui.rs                 # 호스트 GUI (egui) — ID/일회용 비밀번호, 뷰 전용 토글, 승인 프롬프트, 채팅
 │   └── crates/
 │       ├── capture/              # 화면 캡처 + VP8 인코딩
 │       ├── input/                # 입력 주입 enigo (Phase 3)
@@ -111,6 +111,10 @@ Remote_Work/
 | 로깅 | tracing | 0.1 | 구조화 로그 |
 | 설정 | serde_json | 1.x | config.json 읽기/쓰기 |
 | 설정 경로 | dirs | 5 | OS별 설정 디렉토리 |
+| GUI | eframe / egui | 0.28 | 호스트 데스크탑 창 (ID/일회용 비밀번호, 승인 프롬프트, 채팅) |
+| UI 로케일 | sys-locale | — | OS 언어 감지 |
+
+> **호스트 GUI (egui):** 고정 크기(~380x590, 최소화/최대화 버튼 없음) 창. Host ID + 일회용 비밀번호, 뷰 전용 모드 토글, 연결 상태와 "Quit" 버튼을 표시한다. 뷰어 접속 시 **연결 승인 프롬프트(Allow/Deny)** 가 뜨고 Allow 시에만 세션이 수립된다. 파일 수신 시 저장 경로를 보여주는 **파일 수신 승인 프롬프트(Accept/Deny)** 가 뜨고, 단일 창 채팅 화면(뒤로 "←" 버튼, 상대 메시지 좌측/호스트 메시지 우측 정렬, 한글 입력 지원)을 제공한다. 창을 닫으면(X) 종료 대신 작업 표시줄로 최소화된다. (이전 tray-icon 시스템 트레이는 제거됨.)
 
 #### `capture` 크레이트
 
@@ -135,6 +139,14 @@ Remote_Work/
 | Protobuf | prost | 0.12 | 시그널링 메시지 인코딩 |
 | 바이너리 데이터 | bytes | 1.x | WebRTC Sample 데이터 |
 
+**DataChannel (4개):**
+- `"input"` (뷰어→호스트, Protobuf `InputEvent`) — 마우스/키보드
+- `"chat"` (양방향, Protobuf `ChatEnvelope`)
+- `"file"` (뷰어→호스트, Protobuf `FileTransferMessage`) — SHA-256 검증, 64KB 청크
+- `"control"` (호스트→뷰어) — 모니터 목록 / 제어
+
+**mDNS 비활성화:** 호스트 WebRTC는 `MulticastDnsMode::Disabled`로 설정하여 Windows에서 "Failed to send mDNS packet" 로그 스팸을 방지한다.
+
 **빌드 전제조건:** OpenSSL (webrtc-rs 의존성)
 - Windows: `OPENSSL_DIR` 환경변수 설정 또는 rustls feature 사용
 
@@ -149,7 +161,9 @@ Remote_Work/
 | 항목 | 기술 | 버전 | 용도 |
 |------|------|------|------|
 | 비밀번호 해시 | argon2 | 0.5 | Argon2id (Phase 5용) |
-| 난수 | rand | 0.8 | host_id / password 생성 |
+| 난수 | rand | 0.8 | host_id(영구 9자리) / 일회용 비밀번호 생성 |
+
+> **일회용 비밀번호:** 호스트 비밀번호는 실행할 때마다 새로 생성되며 디스크에 저장되지 않는다(serde skip). 세션이 끝나면 유출된 비밀번호는 무용지물이 된다. 따라서 config.json에는 비밀번호 필드가 없다.
 
 #### `proto` 크레이트
 
@@ -173,6 +187,8 @@ Remote_Work/
 | 시그널링 | WebSocket (브라우저 내장) | — | JSON 텍스트 프레임 |
 | 패스워드 해시 | Web Crypto API | — | SHA-256 (`crypto.subtle.digest`) |
 
+> **시그널링 URL 자동 유도:** 뷰어는 자신의 페이지 origin으로부터 시그널링 URL을 자동으로 유도한다 — 배포 시 `wss://<host>/signal`, localhost에서는 `ws://localhost:8080`, 또는 `VITE_SIGNALING_URL`이 설정되어 있으면 그 값을 사용한다. 하나의 빌드가 도메인 별 재빌드 없이 어떤 도메인에서든 동작한다.
+
 **시그널링 메시지 포맷 (JSON):**
 ```json
 { "type": "connect_request",          "payload": { "target_host_id": "...", "password_hash": "...", "viewer_session_id": "..." } }
@@ -194,6 +210,8 @@ Viewer (JSON/WS)          Signaling Server           Host (Protobuf/WS)
        │◀──connect_response──────│                          │
        │                         │                          │
        │──sdp_offer─────────────▶│──SdpOffer (Proto)───────▶│
+       │                         │                          │ 호스트 GUI 연결 승인(Allow/Deny)
+       │                         │                          │ ※ 1:1: 활성 세션이 있으면 두 번째 offer 거절
        │                         │                          │ HostPeerConnection::handle_offer()
        │                         │                          │ → SDP answer 생성
        │                         │◀─SdpAnswer (Proto)───────│
@@ -206,3 +224,5 @@ Viewer (JSON/WS)          Signaling Server           Host (Protobuf/WS)
 ```
 
 > Phase 5 이후: 시그널링 연결은 WSS(TLS), 비밀번호는 Argon2id 해시, 재연결은 지수 백오프(최대 10회)
+>
+> 현재: 연결마다 호스트 GUI 연결 승인(Allow/Deny)을 거치며, 활성 세션이 있으면 두 번째 뷰어는 거절된다(1:1 연결). **뷰 전용 모드**(config `allow_control`, 기본 true; 환경변수 `ALLOW_CONTROL=0/false`로 비활성화)가 꺼지면 입력이 무시된다. **모니터 선택**은 `"control"` DataChannel로 모니터 목록을 전달해 뷰어가 볼 모니터를 고르고, 호스트가 캡처러/인코더를 재구성한다.

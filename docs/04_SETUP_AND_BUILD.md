@@ -16,7 +16,7 @@
    - [Signaling Server](#signaling-server)
    - [Host Agent](#host-agent)
    - [Viewer Client](#viewer-client)
-5. [Docker로 시그널링 서버 실행](#docker로-시그널링-서버-실행)
+5. [시그널링 서버 실행 (로컬/프로덕션)](#시그널링-서버-실행-로컬프로덕션)
 6. [개발 환경에서 전체 실행하기](#개발-환경에서-전체-실행하기)
 7. [환경 변수](#환경-변수)
 8. [자주 발생하는 빌드 에러](#자주-발생하는-빌드-에러)
@@ -151,13 +151,36 @@ PowerShell 또는 시스템 환경 변수에 추가:
 ```powershell
 # vcpkg 설치 경로에 맞게 수정
 $env:VCPKG_ROOT = "C:\vcpkg"
+$env:VCPKGRS_DYNAMIC = "1"                       # vcpkg libvpx 동적 링크
 $env:OPENSSL_DIR = "C:\vcpkg\installed\x64-windows"
 $env:OPENSSL_LIB_DIR = "C:\vcpkg\installed\x64-windows\lib"
 $env:OPENSSL_INCLUDE_DIR = "C:\vcpkg\installed\x64-windows\include"
 $env:VPX_VERSION = "1.13"
 $env:VPX_INCLUDE_PATH = "C:\vcpkg\installed\x64-windows\include"
 $env:VPX_LIB_PATH = "C:\vcpkg\installed\x64-windows\lib"
+
+# protoc 경로 (prost-build)
+$env:PROTOC = "C:\ProgramData\chocolatey\bin\protoc.exe"
+
+# vpx-sys bindgen용 libclang — 반드시 x64 (ARM64 아님)
+$env:LIBCLANG_PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\bin"
+
+# pkgconf (vcpkg libvpx 탐색)
+$env:PKG_CONFIG = "C:\vcpkg\installed\x64-windows\tools\pkgconf\pkgconf.exe"
+$env:PKG_CONFIG_PATH = "C:\vcpkg\installed\x64-windows\lib\pkgconfig"
+
+# audiopus_sys가 번들 opus를 빌드할 때 CMake 4.x가 pre-3.5 최소 버전을 거부하는 문제 회피
+$env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 ```
+
+> **중요:** `host-agent`를 Windows에서 `cargo build`/`cargo check` 하려면 위 변수들이 모두 필요하다.
+> - `PROTOC`: `prost-build`가 protoc 바이너리를 호출한다.
+> - `LIBCLANG_PATH`: `vpx-sys`의 bindgen이 사용한다. 반드시 Visual Studio LLVM **x64** bin을 가리켜야 하며 ARM64 libclang을 쓰면 안 된다.
+> - `VCPKGRS_DYNAMIC=1` + `VCPKG_ROOT`: vcpkg의 libvpx를 동적 링크한다.
+> - `PKG_CONFIG` / `PKG_CONFIG_PATH`: pkgconf가 vcpkg에 설치된 libvpx를 찾도록 한다.
+> - `CMAKE_POLICY_VERSION_MINIMUM=3.5`: `audiopus_sys`가 번들 opus를 빌드하며, 그 CMakeLists의 pre-3.5 최소 버전을 CMake 4.x가 거부하는 것을 우회한다.
+>
+> `signaling-server`만 빌드할 때는 `PROTOC`만 있으면 된다. 오디오 지원을 위해 vcpkg에 `opus:x64-windows`도 필요하다.
 
 > 시스템 재시작 없이 적용하려면 현재 터미널 세션에 위 명령어를 실행한다.
 > 영구 적용은 "시스템 속성 → 환경 변수"에서 설정.
@@ -192,7 +215,7 @@ sudo apt install -y \
 | `libopus-dev` | `audio` 크레이트 (Opus 인코딩/디코딩) |
 | `libx11-dev`, `libxext-dev` | `xcap` 크레이트 (X11 화면 캡처) |
 | `libxcb*` | `xcap` Wayland/XCB 지원 |
-| `libdbus-1-dev` | 시스템 트레이 (Phase 4) |
+| `libdbus-1-dev` | 호스트 GUI (egui) 및 데스크톱 통합 |
 
 > Fedora/RHEL: `libvpx-devel`, `openssl-devel`, `libX11-devel`, `libXext-devel` 패키지명 사용
 
@@ -284,24 +307,41 @@ npm run electron:build
 
 ---
 
-## Docker로 시그널링 서버 실행
+## 시그널링 서버 실행 (로컬/프로덕션)
 
-로컬 개발이나 서버 배포 시 Docker를 사용하면 네이티브 의존성(protoc 등) 없이 실행할 수 있다.
+> ⚠️ **시그널링 서버는 TLS 없이는 시작되지 않는다.** 반드시 다음 중 하나를 선택해야 한다.
+> - 프로덕션(WSS): `--tls-cert`와 `--tls-key`를 함께 전달
+> - 로컬 개발(평문 WS): `--insecure` 전달 (비밀번호가 평문으로 오가므로 개발 전용)
+>
+> 옵션 없이 `cargo run` 또는 `./signaling-server`만 실행하면 에러와 함께 종료된다.
+
+### 로컬 개발
+
+프로젝트 루트의 `docker-compose.yml`은 제거되었다. 로컬에서는 cargo로 직접 실행한다.
 
 ```bash
-# 프로젝트 루트에서 실행
-docker compose up signaling-server
-
-# 백그라운드 실행
-docker compose up -d signaling-server
-
-# 로그 확인
-docker compose logs -f signaling-server
+cd signaling-server
+cargo run -- --insecure
 ```
 
-시그널링 서버는 `0.0.0.0:8080`에서 WebSocket을 수신한다.
+시그널링 서버는 `0.0.0.0:8080`에서 평문 WebSocket(`ws://`)을 수신한다.
 
-> `docker-compose.yml`에 coturn(TURN 서버)도 정의되어 있으나 Phase 5 전까지는 사용하지 않는다.
+### 프로덕션 배포
+
+프로덕션 배포는 `deploy/` 폴더의 패키지로 구성된다. 자세한 절차는 `deploy/README.md`를 참고한다.
+
+- **nginx**가 TLS를 종단(terminate)하고, 뷰어 SPA를 서빙하며, `/signal` 경로를 시그널링 서버로 리버스 프록시한다. (시그널링 서버는 프라이빗 Docker 네트워크 안에서 `--insecure`로 동작한다.)
+- **certbot**이 Let's Encrypt 인증서를 자동 갱신한다.
+- **coturn**(TURN 서버)은 compose 프로파일로 opt-in이다: `docker compose --profile turn up -d`
+
+```bash
+cd deploy
+cp .env.example .env        # DOMAIN 과 이메일 설정
+sh init-letsencrypt.sh      # 최초 인증서 발급
+docker compose up -d
+```
+
+> 과거의 루트에서 실행하던 `docker compose up signaling-server` 명령은 더 이상 동작하지 않는다.
 
 ---
 
@@ -313,10 +353,10 @@ docker compose logs -f signaling-server
 
 ```bash
 cd signaling-server
-RUST_LOG=debug cargo run
-# 또는 Docker:
-# docker compose up signaling-server
+RUST_LOG=debug cargo run -- --insecure
 ```
+
+> `--insecure`는 로컬 개발용(평문 WS)이다. 이 옵션이나 `--tls-cert`/`--tls-key` 중 하나가 없으면 서버가 시작되지 않는다.
 
 `Signaling server listening on ws://0.0.0.0:8080` 메시지 확인.
 
@@ -327,17 +367,28 @@ cd host-agent
 RUST_LOG=debug cargo run
 ```
 
-최초 실행 시 `~/.config/remote-work/config.json`이 자동 생성된다:
+최초 실행 시 OS별 설정 경로에 `config.json`이 자동 생성된다 (`dirs::config_dir()/remote-work/config.json`):
+
+| OS | 경로 |
+|----|------|
+| Windows | `%APPDATA%\remote-work\config.json` |
+| Linux | `~/.config/remote-work/config.json` |
+| macOS | `~/Library/Application Support/remote-work/config.json` |
+
 ```json
 {
   "host_id": "123456789",
-  "password": "AB3KP7",
   "signaling_server_url": "ws://localhost:8080",
-  ...
+  "stun_servers": ["..."],
+  "turn_server": null,
+  "allowed_dirs": ["..."],
+  "allow_control": true
 }
 ```
 
-터미널에 출력된 `host_id`와 `password`를 메모한다.
+> **일회용 비밀번호:** 호스트 비밀번호는 매 실행마다 새로 생성되며 디스크에 저장되지 않는다(`serde` skip). 따라서 `config.json`에는 비밀번호 필드가 없다. 유출되어도 세션이 끝나면 쓸모가 없다.
+
+`host_id`는 최초 실행 시 생성되어 유지되는 9자리 숫자다. 실행 시 **호스트 GUI (egui)** 창에 표시되는 Host ID와 **일회용 비밀번호**를 확인해 뷰어에 입력한다.
 
 ### 터미널 3 — Viewer Client
 
@@ -354,14 +405,23 @@ npm run dev
 
 ### Signaling Server
 
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `LISTEN_ADDR` | `0.0.0.0:8080` | WebSocket 수신 주소:포트 |
-| `RUST_LOG` | (없음) | 로그 레벨 (`debug`, `info`, `warn`, `error`) |
+| 변수 | 대응 CLI 플래그 | 기본값 | 설명 |
+|------|----------------|--------|------|
+| `LISTEN_ADDR` | `--listen` | `0.0.0.0:8080` | WebSocket 수신 주소:포트 |
+| `TLS_CERT` | `--tls-cert` | (없음) | TLS 인증서 경로 (WSS, 프로덕션) |
+| `TLS_KEY` | `--tls-key` | (없음) | TLS 개인 키 경로 (WSS, 프로덕션) |
+| `ALLOW_INSECURE` | `--insecure` | (없음) | 평문 WS 허용 (개발 전용) |
+| `RUST_LOG` | — | (없음) | 로그 레벨 (`debug`, `info`, `warn`, `error`) |
+
+> CLI는 `clap` 기반이다. TLS 없이는 서버가 시작되지 않으므로 `--tls-cert`+`--tls-key`(프로덕션) 또는 `--insecure`(개발) 중 하나가 반드시 필요하다.
 
 예시:
 ```bash
-LISTEN_ADDR=0.0.0.0:9000 RUST_LOG=info ./signaling-server
+# 로컬 개발 (평문 WS)
+LISTEN_ADDR=0.0.0.0:9000 RUST_LOG=info ./signaling-server --insecure
+
+# 프로덕션 (WSS)
+TLS_CERT=/etc/ssl/cert.pem TLS_KEY=/etc/ssl/key.pem ./signaling-server
 ```
 
 ### Host Agent
@@ -369,21 +429,30 @@ LISTEN_ADDR=0.0.0.0:9000 RUST_LOG=info ./signaling-server
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `SIGNALING_URL` | `ws://localhost:8080` | 시그널링 서버 URL |
+| `ALLOW_CONTROL` | `1` (true) | 뷰 전용 모드 제어. `0`/`false`면 입력을 무시(뷰 전용) |
 | `RUST_LOG` | (없음) | 로그 레벨 |
 | `TURN_URL` | (없음) | TURN 서버 URL (coturn) |
 | `TURN_USERNAME` | (없음) | TURN 사용자명 |
 | `TURN_CREDENTIAL` | (없음) | TURN 비밀번호 |
 
-예시 (원격 서버 연결):
+예시 (프로덕션 WSS 서버 연결):
 ```bash
-SIGNALING_URL=ws://myserver.com:8080 RUST_LOG=info ./host-agent
+SIGNALING_URL=wss://myserver.com/signal RUST_LOG=info ./host-agent
 ```
+
+> `ALLOW_CONTROL`은 `config.json`의 `allow_control` 필드에 대응하며, 호스트 GUI (egui)의 뷰 전용 모드 토글로도 켜고 끌 수 있다.
 
 > `SIGNALING_URL`은 `config.json`에도 설정 가능하다. 환경 변수가 우선 적용된다.
 
 ### Viewer Client
 
-`viewer-client/` 루트에 `.env` 파일 생성:
+뷰어는 시그널링 URL을 자신의 페이지 origin에서 자동으로 유추한다. 따라서 도메인마다 다시 빌드할 필요 없이 하나의 빌드가 어떤 도메인에서도 동작한다.
+
+- 배포 환경: `wss://<host>/signal`
+- localhost: `ws://localhost:8080`
+- `VITE_SIGNALING_URL`이 설정된 경우: 해당 값을 사용
+
+로컬 개발에서 다른 서버를 강제하려면 `viewer-client/` 루트에 `.env` 파일을 만든다:
 
 ```env
 VITE_SIGNALING_URL=ws://localhost:8080
@@ -491,8 +560,10 @@ macOS 12 이상에서 화면 캡처 권한이 필요하다.
 □ Node.js 18+ 설치
 
 플랫폼별:
-□ Windows: vcpkg → libvpx:x64-windows, openssl:x64-windows 설치
-           환경 변수 OPENSSL_DIR, VPX_LIB_PATH 설정
+□ Windows: vcpkg → libvpx:x64-windows, openssl:x64-windows, opus:x64-windows 설치
+           환경 변수 OPENSSL_DIR, VPX_LIB_PATH, VCPKGRS_DYNAMIC=1,
+           PROTOC, LIBCLANG_PATH(x64), PKG_CONFIG, PKG_CONFIG_PATH,
+           CMAKE_POLICY_VERSION_MINIMUM=3.5 설정
 □ Linux:   apt install libvpx-dev libssl-dev libx11-dev libxcb1-dev
 □ macOS:   brew install libvpx openssl, export OPENSSL_DIR=...
 
@@ -502,9 +573,10 @@ macOS 12 이상에서 화면 캡처 권한이 필요하다.
 □ cd viewer-client && npm install && npm run dev
 
 실행:
-□ 시그널링 서버 기동 확인 (포트 8080)
-□ 호스트 에이전트 실행 → host_id / password 확인
-□ 뷰어 접속 → ID + 비밀번호 입력 → 연결 성공
+□ 시그널링 서버 기동 확인 (cargo run -- --insecure, 포트 8080)
+  (TLS 없이는 시작 안 됨: 개발은 --insecure, 프로덕션은 --tls-cert/--tls-key)
+□ 호스트 에이전트 실행 → 호스트 GUI (egui)에서 Host ID / 일회용 비밀번호 확인
+□ 뷰어 접속 → ID + 일회용 비밀번호 입력 → 호스트 GUI 연결 승인(Allow) → 연결 성공
 
 Electron 패키지 빌드 (선택):
 □ cd viewer-client && npm run electron:build
