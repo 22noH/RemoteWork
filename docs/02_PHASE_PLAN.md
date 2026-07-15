@@ -7,7 +7,7 @@
 | **1** | ✅ 완료 | 프로젝트 기초 — Proto, 시그널링 서버, Host/Viewer 스켈레톤 |
 | **2** | ✅ 완료 | 화면 공유 — WebRTC 비디오 스트림 (xcap→VP8→P2P) |
 | **3** | ✅ 완료 | 원격 제어 — 뷰어 입력 → 호스트 enigo 주입 |
-| **4** | ✅ 완료 | 파일 전송 + 채팅 + 시스템 트레이 |
+| **4** | ✅ 완료 | 파일 전송 + 채팅 + 호스트 GUI (egui) |
 | **5** | ✅ 완료 | 보안 강화 + TURN 릴레이 + Electron 패키징 |
 
 ---
@@ -32,9 +32,13 @@
 - 속도 제한: 5회 실패 → 10분 차단
 
 #### Host Agent (`host-agent/`)
-- 설정 파일 자동 생성 (`~/.config/remote-work/config.json`)
+- 설정 파일 자동 생성 (`dirs::config_dir()/remote-work/config.json`)
+  - Windows: `%APPDATA%\remote-work\config.json`
+  - Linux: `~/.config/remote-work/config.json`
+  - macOS: `~/Library/Application Support/remote-work/config.json`
+  - 저장 항목: `host_id`(9자리 숫자, 영구), `signaling_server_url`, `stun_servers`, `turn_server`, `allowed_dirs`, `allow_control`
   - `host_id`: 9자리 숫자 난수
-  - `password`: 6자리 영숫자 난수 (혼동 방지 문자 제외)
+  - **일회용 비밀번호**: 매 실행마다 새로 생성되며 디스크에 저장하지 않음(`serde` skip). config.json에 비밀번호 필드가 없으므로 유출되어도 세션 종료 후 무용지물
 - 시그널링 서버 WebSocket 연결
 - Protobuf 메시지 송수신 (단방향 수신 스텁)
 
@@ -132,17 +136,19 @@
 
 ---
 
-## Phase 4 — 파일 전송 + 채팅 + 시스템 트레이 ✅
+## Phase 4 — 파일 전송 + 채팅 + 호스트 GUI ✅
 
 ### 목표
-파일 전송, 채팅, 시스템 트레이 아이콘
+파일 전송, 채팅, 호스트 데스크톱 UI
+
+> 원래 계획은 **시스템 트레이 아이콘**이었으나, 최종적으로 **호스트 GUI (egui)** 데스크톱 창으로 대체되었다. (`host-agent/src/tray.rs` 제거 → `host-agent/src/ui.rs` 로 교체, `tray-icon` 의존성 삭제, `eframe`/`egui` 0.28 + `sys-locale` 추가)
 
 ### 구현 계획
 
 #### 파일 전송
 - `file_transfer.proto`: `FileChunk { file_id, chunk_index, data, total_chunks }`, `FileInfo { name, size, mime_type }`
 - 호스트 `sender.rs`: 파일을 청크로 나누어 `fileChannel`로 전송
-- 호스트 `receiver.rs`: 청크 수신 → 파일 재조합 → `allowed_dirs` 내에 저장
+- 호스트 `receiver.rs`: 청크 수신 → 파일 재조합 → OS **다운로드** 폴더에 저장 (호스트가 파일명 지정, Accept/Deny 승인 후, SHA-256 검증)
 - 뷰어 `file-transfer.ts`: 드래그 앤 드롭 or 파일 선택 → 청크 전송
 - 뷰어 `FileTransfer.tsx`: 전송 진행률 UI
 
@@ -151,11 +157,15 @@
 - 데이터 채널 `chatChannel` 양방향 사용
 - 뷰어 `ChatPanel.tsx` + `chat-store.ts` 연결
 
-#### 시스템 트레이 (`tray.rs`)
-- Host ID / Password 표시
-- 연결 중인 뷰어 목록
-- 연결 종료 버튼
-- Windows: `tray-item` 크레이트 또는 `winrt` API
+#### 호스트 GUI (egui) (`ui.rs`)
+- `eframe`/`egui` 0.28 기반 고정 크기(~380x590) 데스크톱 창 (최소화/최대화 버튼 없음)
+- Host ID + 일회용 비밀번호 표시
+- **뷰 전용 모드** 토글 (`allow_control`)
+- 연결 상태 표시 + "Quit" 버튼
+- **연결 승인 프롬프트**(Allow/Deny): 뷰어 접속 시 표시, Allow 시에만 세션 수립
+- **단일 창 채팅 화면**: 탭형 네비게이션(뒤로가기 "←" 버튼), 상대 메시지 왼쪽 정렬 / 호스트 메시지 오른쪽 정렬, 한글 입력 지원
+- **파일 수신 승인 프롬프트**(Accept/Deny): 저장 경로 표시
+- 창 닫기(X)는 종료가 아니라 작업 표시줄로 최소화
 
 ---
 
@@ -207,7 +217,7 @@
 | 시그널링 암호화 | WSS TLS 지원 (완료) | Phase 5 (wss://) |
 | P2P 실패 처리 | TURN + coturn (완료) | Phase 5 (TURN) |
 | 입력 좌표 정규화 | 미구현 | Phase 3 |
-| 다중 모니터 | 첫 번째 모니터만 | Phase 4 이후 |
+| 다중 모니터 | 모니터 선택 완료 (해결) | Phase 4 이후 |
 | 재연결 | 지수 백오프 재연결 (완료) | Phase 4 이후 |
 | 세션 토큰 만료 | 5분 idle timeout (완료) | Phase 5 |
 
@@ -222,3 +232,19 @@
 | 세션 health check | ✅ 완료 | 호스트 30초마다 dead session 자동 정리 |
 | Reconnect UX | ✅ 완료 | 재연결 오버레이, 연결 상태 표시등 |
 | 코드 서명 | ⬜ 보류 | 인증서 필요 (EV cert / Apple Developer) |
+
+---
+
+## Post-Phase 5 — 보안·UI 강화 ✅
+
+| 항목 | 상태 | 내용 |
+|------|------|------|
+| 1:1 연결 강제 | ✅ 완료 | 세션이 살아있는(Failed/Closed가 아닌) 동안 두 번째 뷰어 SDP offer 거부 — 동시 다중 제어 방지 |
+| 일회용 비밀번호 | ✅ 완료 | 매 실행마다 새로 생성, 디스크 미저장(config.json에 비밀번호 필드 없음) |
+| TLS 강제 (`--insecure`) | ✅ 완료 | 시그널링 서버는 TLS 없이 시작 거부. `--tls-cert`+`--tls-key`(운영 WSS) 또는 `--insecure`(로컬 개발, 평문 WS) 필요. 로컬: `cargo run -- --insecure` |
+| 연결 승인 | ✅ 완료 | 뷰어 접속 시 호스트 GUI에 Allow/Deny 프롬프트, Allow 시에만 세션 수립 |
+| 뷰 전용 모드 | ✅ 완료 | `allow_control`(기본 true, `ALLOW_CONTROL=0/false`로 비활성). 끄면 화면은 보이되 입력 무시. 호스트 UI에서 토글 |
+| 모니터 선택 | ✅ 완료 | 호스트가 `"control"` 데이터 채널로 모니터 목록 전송 → 뷰어가 선택 → 호스트가 캡처러/인코더 재생성 |
+| 파일 다운로드 저장 | ✅ 완료 | 승인된 파일을 OS 다운로드 폴더에 저장, SHA-256 검증 |
+| mDNS off | ✅ 완료 | 호스트 WebRTC `MulticastDnsMode::Disabled` — Windows "Failed to send mDNS packet" 로그 스팸 제거 |
+| 자체 배포 패키지 (`deploy/`) | ✅ 완료 | 루트 `docker-compose.yml` 제거. nginx(TLS 종료 + 뷰어 SPA + `/signal` 리버스 프록시) + certbot(Let's Encrypt 자동 갱신) + coturn(TURN, `--profile turn` 옵트인). 상세는 `deploy/README.md` |
