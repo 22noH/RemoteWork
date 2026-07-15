@@ -1,238 +1,39 @@
-# Company Rules
+# Remote Work
 
-> Powered by [Tycono](https://tycono.ai) — AI Company Operating Platform
+TeamViewer류 오픈소스 원격 데스크탑. Rust 호스트 + TypeScript 뷰어 하이브리드,
+WebRTC P2P로 화면 공유·원격 제어.
 
----
+## 구조
 
-## Task Routing
+| 폴더 | 내용 |
+|------|------|
+| `proto/` | Protobuf 메시지 정의 (messages, input, file_transfer, chat) |
+| `signaling-server/` | Rust WebSocket 시그널링 (JSON=뷰어 / Protobuf=호스트, TLS 필수) |
+| `host-agent/` | Rust 호스트 — 화면 캡처(xcap+VP8), WebRTC, 입력(enigo), 오디오(cpal+opus), 호스트 GUI(egui) |
+| `viewer-client/` | TypeScript + React + Vite + Electron 뷰어 |
+| `coturn/` | TURN 서버 설정 |
+| `deploy/` | 자체 배포 패키지 (nginx + TLS + certbot, opt-in TURN) — `deploy/README.md` |
+| `docs/` | 프로젝트 문서 (개요·Phase·빌드 가이드) |
+| `architecture/` | 시스템 아키텍처 |
 
-| Task | Read First | Role |
-|------|-----------|------|
-| Product planning | `projects/` | PM |
-| Technical design | `architecture/` | CTO |
-| Implementation | `projects/*/tasks.md` | Engineer |
-| UI/UX Design | `projects/*/design/` | Designer |
-| Testing/QA | `projects/*/tasks.md` | QA |
-| Operations | `operations/` | PM |
-| Business/Revenue | `company/` | CBO |
-| Domain knowledge | `knowledge/` | CBO |
+## 로컬 실행
 
----
+```bash
+# 1. 시그널링 (TLS 없이는 시작 안 됨 → 로컬은 --insecure)
+cd signaling-server && cargo run -- --insecure
 
-## AKB Core Concepts
+# 2. 호스트 (화면 공유할 PC)
+cd host-agent && cargo run
 
-> **AKB** = A file-based knowledge system where AI uses **search (Grep/Glob)** to find and **contextual links** to navigate
->
-> Full reference: `methodologies/agentic-knowledge-base.md`
-
-| Layer | Role | AI Usage |
-|-------|------|----------|
-| **Root** (CLAUDE.md) | Minimal routing | Auto-injected as system prompt |
-| **Hub** ({folder}.md) | TOC + tool/guide references | **Check before starting work** |
-| **Node** (*.md) | Actual information | Search directly via Grep/Glob |
-
----
-
-## AI Work Rules
-
-### The Loop (Work Cycle)
-
-Every task follows this cycle. Implementing without completing the cycle is only half the job.
-
-| Step | Action | Why |
-|------|--------|-----|
-| ① Knowledge | Check/research related docs | Without context, direction goes wrong |
-| ② Task | Define task from docs | Without requirements, you'll rework |
-| ③ Implement | Execute the actual work | Value creation |
-| ④ Knowledge Update | Update docs with new insights | Prevents knowledge decay |
-| ⑤ Task Update | Update task status, check next work | Ensures continuity |
-
-**C-Level**: Execute The Loop autonomously — decompose tasks, analyze dependencies, dispatch independent tasks in parallel, collect results.
-**Member**: After implementation, always complete steps ④ and ⑤.
-
-### Hub-First Principle
-
-> ⛔ **Read the relevant Hub document before starting any work.**
-
-Check the Task Routing table above to find the right "Read First" path.
-Every folder has a Hub file (`{folder-name}.md`) as its entry point.
-Read the Hub's existing tools/scripts/guides before starting work.
-
-### Skill Check Principle
-
-> ⛔ **If `.claude/skills/{role-id}/SKILL.md` exists, you MUST read it.**
-
-Skill files define the tools, commands, and guides for each Role.
-Working without reading skills means missing existing tools and starting from scratch.
-
-### Custom Rules (CRITICAL)
-
-> ⛔ **Before starting work, check if `.tycono/custom-rules.md` exists and read it.**
-> This file contains company-specific rules, constraints, and processes.
-> If the file doesn't exist, ignore this section.
-
-### Git Rules
-
-- Source code changes: feature branch → PR → merge
-- Direct push to main is prohibited
-
-### Knowledge Gate
-
-> **Before creating a new document, search existing docs first.**
-
-```
-1. Summarize the insight + 3-5 keywords
-2. Search existing docs with those keywords (grep 3+ terms)
-3. Decide:
-   - Overlap 70%+ -> Add to existing document
-   - Overlap 30-70% -> New doc + cross-link to existing
-   - Overlap <30% -> New document (register in Hub)
-   - Temporary info -> Journal only (no new doc)
-4. Cross-link to related docs
-5. Register in the relevant Hub
+# 3. 뷰어 (원격 접속할 PC)
+cd viewer-client && npm install && npm run dev
 ```
 
-### Document Hygiene
+빌드 전제조건(protoc, libvpx/opus/OpenSSL, Windows env 등)과 상세 절차는
+[`docs/04_SETUP_AND_BUILD.md`](docs/04_SETUP_AND_BUILD.md). 프로덕션 배포는
+[`deploy/README.md`](deploy/README.md).
 
-| Rule | Description |
-|------|-------------|
-| No orphan docs | Every document must be reachable from a Hub |
-| Hub pattern | Each folder's entry point is `{folder}.md` |
-| Prefer existing | Adding 1 doc = maintenance cost. Strengthen existing > create new |
-| Cross-link | New docs must reference at least 1 related doc |
-| Source attribution | External research must cite source and date |
+## Git 규칙
 
-### Skills
-
-Roles have equipped **Skills** -- modular capability guides in `.claude/skills/`.
-
-- Role-specific skills: `.claude/skills/{role-id}/SKILL.md`
-- Shared skills: `.claude/skills/_shared/{skill-id}/SKILL.md`
-- Each Role's equipped skills are listed in `role.yaml` under `skills:`
-- **Always read SKILL.md before starting work** for that Role
-
-### Agent Dispatch Rules (CRITICAL)
-
-> **Sub-agents (Agent/Task) do NOT automatically receive CLAUDE.md.**
-> **You MUST instruct them to read CLAUDE.md in the first line of the prompt.**
-
-Without the Root (CLAUDE.md), sub-agents skip Hubs and dive straight into code,
-missing existing tools, guides, and constraints.
-
-#### Required Prompt Pattern
-
-Every sub-agent prompt **must include**:
-
-1. Instruction to read CLAUDE.md
-2. **Required skill file paths** for the Role
-
-```
-⛔ AKB Rule: Read CLAUDE.md before starting work.
-Find the relevant Hub from the "Task Routing" table and read it first.
-Check the Hub's existing tools/guides/constraints before exploring code.
-⛔ Read the required skill files below and use the tools/commands defined in them.
-```
-
-#### Role Skill Mapping
-
-| Role | Required Skills (path: `.claude/skills/{name}/SKILL.md`) |
-|------|--------------------------------------------------------|
-| Each Role | `{role-id}` + shared skills listed in `role.yaml` |
-
-> Check each Role's `role.yaml` `skills:` field for the exact list.
-
-### Self-Verification Before Escalation (CRITICAL)
-
-> **Before saying "I can't" or "user action needed", check your own tools/skills first.**
-
-#### Checklist (before reporting inability)
-
-```
-□ 1. Check CLAUDE.md routing table for relevant skills/tools
-□ 2. Glob search .claude/skills/ for related skills
-□ 3. Read the skill and determine if it can solve the problem
-□ 4. Only if all above fail → Report: "Tried X but unable due to [specific reason]"
-```
-
-### Exploration Depth
-
-> **Don't stop at Hubs. Explore detailed documents for thorough understanding.**
-
-| Question Type | Minimum | Additional |
-|--------------|---------|------------|
-| Implementation | Hub | Related Node |
-| Debugging | Hub | Related issues/logs |
-| **Strategy/Design** | Hub | **Design docs, past decisions, architecture details** |
-| **New Feature** | Hub | **Existing implementation patterns, related architecture** |
-
-### Skill Synchronization (CRITICAL)
-
-> **When changing code/processes, update related `.claude/skills/` SKILL.md files too.**
-
-| Change Type | Skill Update |
-|-------------|-------------|
-| API endpoint change | Update API reference |
-| New tool/script added | Add to tool listing |
-| Process change | Update procedure guide |
-| Feature removed | Remove related section |
-
-### AKB Management (CRITICAL)
-
-> **Every Role manages knowledge as part of their work. Don't just code and stop.**
-
-After completing any task, check:
-
-| # | Item | Description |
-|---|------|-------------|
-| 1 | **New knowledge?** | Did this task produce new insights/decisions/analysis? |
-| 2 | **Search existing docs** | Are there related docs already? (grep 3+ keywords) |
-| 3 | **Decide location** | Add to existing doc vs create new (prefer existing) |
-| 4 | **Hub connection** | Is the new/updated doc reachable from a Hub? |
-| 5 | **Cross-link** | Are there mutual references between related docs? |
-| 6 | **Task update** | Is the task status updated? Next work identified? |
-
----
-
-## Folder Structure
-
-```
-{company}/
-+-- CLAUDE.md                <- AI entry point (Tycono managed)
-+-- .tycono/
-|   +-- config.json          <- Engine settings (auto-generated)
-|   +-- preferences.json     <- UI preferences (auto-generated)
-|   +-- custom-rules.md      <- Company custom rules (user owned)
-|   +-- rules-version        <- Current CLAUDE.md version
-+-- company/
-|   +-- company.md           <- Mission, vision, company info
-+-- roles/
-|   +-- roles.md             <- Role listing (Hub)
-|   +-- {role-id}/
-|       +-- role.yaml        <- Role definition
-|       +-- profile.md       <- Role profile
-|       +-- journal/         <- Work journal
-+-- projects/
-|   +-- projects.md          <- Project listing (Hub)
-+-- architecture/
-|   +-- architecture.md      <- Technical architecture (Hub)
-+-- operations/
-|   +-- standup/             <- Daily standups
-|   +-- waves/               <- Wave execution logs
-|   +-- decisions/           <- Decision log
-|   +-- activity-streams/    <- SSE activity event logs
-|   +-- sessions/            <- Session state
-|   +-- cost/                <- Token usage ledger
-+-- knowledge/
-|   +-- knowledge.md         <- Domain knowledge (Hub)
-+-- methodologies/
-|   +-- methodologies.md     <- Methodology listing (Hub)
-|   +-- agentic-knowledge-base.md  <- AKB protocol reference
-+-- .claude/skills/
-    +-- _shared/             <- Shared skill plugins
-    +-- {role-id}/SKILL.md   <- Role-specific skill guides
-```
-
----
-
-<!-- tycono:managed v0.2.0 — This file is managed by Tycono. Do not edit manually. -->
-<!-- Company-specific rules go in .tycono/custom-rules.md -->
+- 소스 변경은 **feature 브랜치 → PR → 머지**. `master` 직접 push 금지.
+- 커밋 메시지에 공동 작업자(Co-authored-by) 제외.
