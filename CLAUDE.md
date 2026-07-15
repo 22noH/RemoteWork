@@ -11,8 +11,7 @@ WebRTC P2P로 화면 공유·원격 제어.
 | `signaling-server/` | Rust WebSocket 시그널링 (JSON=뷰어 / Protobuf=호스트, TLS 필수) |
 | `host-agent/` | Rust 호스트 — 화면 캡처(xcap+VP8), WebRTC, 입력(enigo), 오디오(cpal+opus), 호스트 GUI(egui) |
 | `viewer-client/` | TypeScript + React + Vite + Electron 뷰어 |
-| `coturn/` | TURN 서버 설정 |
-| `deploy/` | 자체 배포 패키지 (nginx + TLS + certbot, opt-in TURN) — `deploy/README.md` |
+| `deploy/` | 자체 배포 패키지 (nginx + TLS + certbot, opt-in TURN 포함) — `deploy/README.md` |
 | `docs/` | 프로젝트 문서 (개요·Phase·빌드 가이드) |
 | `architecture/` | 시스템 아키텍처 |
 

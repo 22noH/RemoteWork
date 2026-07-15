@@ -1,6 +1,5 @@
 pub mod signaling_client;
 pub mod peer_connection;
-pub mod data_channel;
 
 pub use signaling_client::{SignalingClient, SignalingEvent};
 pub use peer_connection::{DataChannelHandlers, HostPeerConnection};
