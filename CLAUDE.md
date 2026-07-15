@@ -13,7 +13,6 @@ WebRTC P2P로 화면 공유·원격 제어.
 | `viewer-client/` | TypeScript + React + Vite + Electron 뷰어 |
 | `deploy/` | 자체 배포 패키지 (nginx + TLS + certbot, opt-in TURN 포함) — `deploy/README.md` |
 | `docs/` | 프로젝트 문서 (개요·Phase·빌드 가이드) |
-| `architecture/` | 시스템 아키텍처 |
 
 ## 로컬 실행
 
