@@ -3,7 +3,21 @@ import { SignalingClient } from '../core/signaling'
 import { RemotePeerConnection } from '../core/peer-connection'
 import { useConnectionStore } from '../stores/connection-store'
 
-const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL ?? 'ws://localhost:8080'
+// Signaling server URL. An explicit build-time VITE_SIGNALING_URL always wins.
+// Otherwise: localhost uses the dev server on :8080; a deployed viewer targets
+// the same origin over the reverse proxy (wss://<host>/signal), so one build
+// works on any domain without rebuilding.
+function defaultSignalingUrl(): string {
+  const env = import.meta.env.VITE_SIGNALING_URL
+  if (env) return env
+  const { protocol, hostname, host } = window.location
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'ws://localhost:8080'
+  }
+  return `${protocol === 'https:' ? 'wss' : 'ws'}://${host}/signal`
+}
+
+const SIGNALING_URL = defaultSignalingUrl()
 
 export default function ConnectionDialog() {
   const [hostId, setHostId] = useState('')

@@ -26,4 +26,6 @@ EXPOSE 8080
 ENV LISTEN_ADDR=0.0.0.0:8080
 ENV RUST_LOG=signaling_server=info
 
-CMD ["./signaling-server"]
+# ENTRYPOINT so compose/`docker run` can append flags (e.g. --insecure when TLS
+# is terminated by a reverse proxy in front of it).
+ENTRYPOINT ["./signaling-server"]

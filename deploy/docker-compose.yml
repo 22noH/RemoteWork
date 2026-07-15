@@ -1,0 +1,65 @@
+# Remote Work — production deployment.
+#
+#   Normal:        docker compose up -d --build         (web + signaling + certbot)
+#   With TURN:     docker compose --profile turn up -d  (adds coturn relay)
+#
+# TLS is terminated by nginx (the `web` service); the signaling server runs on
+# the internal network only, so it never sees the public internet.
+name: remote-work
+
+services:
+  # nginx: serves the built viewer and reverse-proxies WSS to the signaling
+  # server. Also terminates TLS with the Let's Encrypt certs.
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?set DOMAIN in deploy/.env}
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - signaling
+    restart: unless-stopped
+
+  # Rust signaling server. Internal only (no published ports); nginx reaches it
+  # over the compose network. --insecure is safe here because TLS is handled by
+  # nginx and this is never exposed publicly.
+  signaling:
+    build:
+      context: ..
+      dockerfile: signaling-server/Dockerfile
+    command: ["--insecure"]
+    environment:
+      - RUST_LOG=signaling_server=info
+      - LISTEN_ADDR=0.0.0.0:8080
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  # Auto-renews the TLS certificate every 12h. Initial issuance is done once by
+  # deploy/init-letsencrypt.sh.
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: >
+      sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done'
+    restart: unless-stopped
+
+  # TURN relay for strict NATs / corporate firewalls. OFF by default — bring it
+  # up only when you need it:  docker compose --profile turn up -d
+  # Uses host networking because coturn needs the host's UDP relay port range.
+  coturn:
+    image: coturn/coturn:latest
+    profiles: ["turn"]
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    restart: unless-stopped
