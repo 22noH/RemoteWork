@@ -1,3 +1,7 @@
+// Hide the console window in release builds (customer-facing GUI app); keep it in
+// debug so developers still see logs.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod config;
 mod ui;
