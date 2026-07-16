@@ -64,8 +64,10 @@ impl Config {
         Self {
             host_id,
             password,
+            // Baked-in production server so a customer just runs the app with
+            // zero config. Devs override with SIGNALING_URL=ws://localhost:8080.
             signaling_server_url: std::env::var("SIGNALING_URL")
-                .unwrap_or_else(|_| "ws://localhost:8080".to_string()),
+                .unwrap_or_else(|_| "wss://eremote.onrender.com".to_string()),
             stun_servers: vec![
                 "stun:stun.l.google.com:19302".to_string(),
                 "stun:stun1.l.google.com:19302".to_string(),
