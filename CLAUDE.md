@@ -1,7 +1,7 @@
 # ERemote
 
-TeamViewer류 오픈소스 원격 데스크탑. Rust 호스트 + TypeScript 뷰어 하이브리드,
-WebRTC P2P로 화면 공유·원격 제어.
+TeamViewer류 소스 공개(BSL 1.1) 원격 데스크탑. Rust 호스트 + TypeScript 뷰어 하이브리드,
+WebRTC P2P로 화면 공유·원격 제어. 비상업 무료 / 상업 유료 — [`LICENSE`](LICENSE).
 
 ## 구조
 
