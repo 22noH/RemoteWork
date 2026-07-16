@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # Builds the exact Docker image Render deploys — validates the signaling
+  # server compiles AND the container builds.
+  signaling:
+    name: signaling-server (docker build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build signaling image
+        run: docker build -f signaling-server/Dockerfile -t eremote-signaling:ci .
+
+  # Host agent has heavy native deps (screen capture, VP8, WebRTC, audio, egui).
+  host-agent:
+    name: host-agent (cargo check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler pkg-config build-essential clang cmake \
+            libvpx-dev libssl-dev libopus-dev libasound2-dev libdbus-1-dev \
+            libx11-dev libxext-dev \
+            libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev libxcb-randr0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libglib2.0-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: host-agent
+      - name: cargo check
+        working-directory: host-agent
+        run: cargo check --workspace
+
+  viewer:
+    name: viewer (tsc + vite build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: viewer-client/package-lock.json
+      - name: Install & build
+        working-directory: viewer-client
+        run: |
+          npm ci
+          npm run build

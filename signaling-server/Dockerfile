@@ -1,5 +1,5 @@
 # Build context: workspace root (docker build -f signaling-server/Dockerfile .)
-FROM rust:1.80-slim-bookworm AS builder
+FROM rust:1-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
