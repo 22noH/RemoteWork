@@ -14,7 +14,7 @@ P2P WebRTC 연결로 실시간 화면 공유 및 입력 제어를 구현한다. 
 ## 디렉토리 구조
 
 ```
-Remote_Work/
+ERemote/
 ├── proto/                        # Protobuf 메시지 정의
 │   ├── messages.proto            # 시그널링 메시지 (Envelope oneof)
 │   ├── input.proto               # 입력 이벤트 (키보드/마우스)
