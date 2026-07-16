@@ -146,6 +146,18 @@ async fn request_approval(shared: &Shared) -> bool {
     decision
 }
 
+/// Stop a session's capture/audio tasks and close its peer connection.
+async fn teardown_session(session: Session) {
+    let _ = session.capture_stop_tx.send(());
+    if let Some(stop) = session.audio_capture_stop {
+        let _ = stop.send(());
+    }
+    if let Some(stop) = session.audio_playback_stop {
+        let _ = stop.send(());
+    }
+    let _ = session.pc.close().await;
+}
+
 pub struct App {
     config: Arc<Config>,
     shared: Shared,
@@ -257,14 +269,7 @@ async fn run_reconnect_loop(
                             }
                             for token in dead_tokens {
                                 if let Some(session) = sessions.remove(&token) {
-                                    let _ = session.capture_stop_tx.send(());
-                                    if let Some(stop) = session.audio_capture_stop {
-                                        let _ = stop.send(());
-                                    }
-                                    if let Some(stop) = session.audio_playback_stop {
-                                        let _ = stop.send(());
-                                    }
-                                    let _ = session.pc.close().await;
+                                    teardown_session(session).await;
                                 }
                             }
                             shared.viewer_count.store(sessions.len(), Ordering::Relaxed);
@@ -360,14 +365,33 @@ async fn handle_event(
         SignalingEvent::SdpOffer { sdp, session_token } => {
             tracing::info!("Connection request for session {}", session_token);
 
-            // 1:1 only — reject a second viewer while one is already connected.
-            // A host that lets multiple viewers in at once is an easy way to
-            // lose control of the machine.
-            let busy = sessions.values().any(|s| {
+            // A dropped viewer leaves a dead peer connection behind. If one is
+            // present, this offer is that viewer reconnecting: replace the dead
+            // session and skip the approval prompt (short "grace" so a network
+            // blip re-heals without the host having to click Allow again).
+            let is_reconnect = {
                 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState as St;
-                !matches!(s.pc.connection_state(), St::Failed | St::Closed)
-            });
-            if busy {
+                let dead: Vec<String> = sessions
+                    .iter()
+                    .filter(|(_, s)| {
+                        matches!(s.pc.connection_state(), St::Failed | St::Disconnected | St::Closed)
+                    })
+                    .map(|(t, _)| t.clone())
+                    .collect();
+                let reconnect = !dead.is_empty();
+                for t in &dead {
+                    if let Some(s) = sessions.remove(t) {
+                        tracing::info!("Replacing dropped session {} (reconnect)", t);
+                        teardown_session(s).await;
+                    }
+                }
+                reconnect
+            };
+
+            // 1:1 only — reject a second viewer while a HEALTHY one is connected.
+            // A host that lets multiple viewers in at once is an easy way to
+            // lose control of the machine. (Dead sessions were just cleared above.)
+            if !sessions.is_empty() {
                 tracing::warn!(
                     "Rejecting {} — a viewer is already connected (1:1 only)",
                     session_token
@@ -375,8 +399,11 @@ async fn handle_event(
                 return;
             }
 
-            // Require the host to approve before accepting the connection.
-            if !request_approval(shared).await {
+            // Require the host to approve — except a reconnect within the grace,
+            // which was already approved for this session moments ago.
+            if is_reconnect {
+                tracing::info!("Reconnect for {} — skipping approval (grace)", session_token);
+            } else if !request_approval(shared).await {
                 tracing::info!("Connection denied by host for session {}", session_token);
                 return;
             }
