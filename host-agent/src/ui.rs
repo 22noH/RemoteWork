@@ -104,7 +104,7 @@ pub fn run(host_id: String, password: String, shared: Shared) -> eframe::Result<
         ..Default::default()
     };
     eframe::run_native(
-        "Remote Work",
+        "ERemote",
         options,
         Box::new(move |cc| {
             style(&cc.egui_ctx);
@@ -234,7 +234,7 @@ impl eframe::App for HostUi {
                     ui.label(egui::RichText::new("🖥").size(22.0));
                     ui.add_space(2.0);
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("Remote Work").size(19.0).strong().color(VALUE));
+                        ui.label(egui::RichText::new("ERemote").size(19.0).strong().color(VALUE));
                         ui.label(egui::RichText::new(self.s.subtitle).size(11.0).color(LABEL));
                     });
                 });

@@ -1,4 +1,4 @@
-# Remote Work — 전체 Phase 계획
+# ERemote — 전체 Phase 계획
 
 ## 로드맵 요약
 

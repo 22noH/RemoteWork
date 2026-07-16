@@ -1,5 +1,5 @@
-appId: com.remotedesktop.viewer
-productName: RemoteDesktop
+appId: com.eremote.viewer
+productName: ERemote
 directories:
   output: release
 files:

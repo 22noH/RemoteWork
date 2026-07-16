@@ -8,7 +8,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(name = "signaling-server", about = "Remote Work Signaling Server")]
+#[command(name = "signaling-server", about = "ERemote Signaling Server")]
 struct Cli {
     /// Listening address. If unset, uses $PORT (Render/Railway/Fly/Heroku
     /// inject it) as 0.0.0.0:$PORT, else 0.0.0.0:8080.

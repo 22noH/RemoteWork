@@ -1,4 +1,4 @@
-# Remote Work
+# ERemote
 
 TeamViewer와 유사한 오픈소스 원격 데스크탑 애플리케이션.
 Rust 호스트 + TypeScript 뷰어 하이브리드 구조로, WebRTC P2P 연결을 통해 실시간 화면 공유와 원격 제어를 제공한다.

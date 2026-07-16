@@ -1,11 +1,11 @@
-# Remote Work — production deployment.
+# ERemote — production deployment.
 #
 #   Normal:        docker compose up -d --build         (web + signaling + certbot)
 #   With TURN:     docker compose --profile turn up -d  (adds coturn relay)
 #
 # TLS is terminated by nginx (the `web` service); the signaling server runs on
 # the internal network only, so it never sees the public internet.
-name: remote-work
+name: eremote
 
 services:
   # nginx: serves the built viewer and reverse-proxies WSS to the signaling
