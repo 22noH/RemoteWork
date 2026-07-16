@@ -106,7 +106,7 @@ npm --version
 
 ```bash
 git clone <repository-url>
-cd Remote_Work
+cd ERemote
 ```
 
 ---

@@ -23,8 +23,8 @@ coturn TURN relay.
 ## Deploy (signaling + viewer + TLS)
 
 ```sh
-git clone https://github.com/22noH/RemoteWork.git
-cd RemoteWork/deploy
+git clone https://github.com/22noH/ERemote.git
+cd ERemote/deploy
 
 cp .env.example .env
 nano .env                     # set DOMAIN and LETSENCRYPT_EMAIL

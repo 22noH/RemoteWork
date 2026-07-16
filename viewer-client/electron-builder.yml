@@ -29,4 +29,4 @@ nsis:
 publish:
   provider: github
   owner: 22noH
-  repo: RemoteWork
+  repo: ERemote
