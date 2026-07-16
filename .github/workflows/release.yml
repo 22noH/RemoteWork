@@ -32,7 +32,8 @@ jobs:
           key: vcpkg-x64-windows-vpx-opus-openssl-v1
 
       - name: Install native libs (vcpkg)
-        run: vcpkg install libvpx:x64-windows opus:x64-windows openssl:x64-windows
+        # pkgconf provides pkg-config, which env-libvpx-sys uses to locate vpx.
+        run: vcpkg install libvpx:x64-windows opus:x64-windows openssl:x64-windows pkgconf:x64-windows
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -46,6 +47,8 @@ jobs:
           LIBCLANG_PATH: C:/Program Files/LLVM/bin
           OPENSSL_DIR: C:/vcpkg/installed/x64-windows
           CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+          PKG_CONFIG: C:/vcpkg/installed/x64-windows/tools/pkgconf/pkgconf.exe
+          PKG_CONFIG_PATH: C:/vcpkg/installed/x64-windows/lib/pkgconfig
         run: cargo build --release
 
       - name: Rename artifact
