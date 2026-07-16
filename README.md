@@ -1,7 +1,9 @@
 # ERemote
 
-TeamViewer와 유사한 오픈소스 원격 데스크탑 애플리케이션.
+TeamViewer와 유사한 소스 공개(source-available) 원격 데스크탑 애플리케이션.
 Rust 호스트 + TypeScript 뷰어 하이브리드 구조로, WebRTC P2P 연결을 통해 실시간 화면 공유와 원격 제어를 제공한다.
+
+> **라이선스:** [Business Source License 1.1](LICENSE) — **비상업 사용은 무료**, 상업/프로덕션 사용은 별도 상업 라이선스 필요. 2030-07-17부터 Apache 2.0으로 전환. 자세한 건 아래 [라이선스](#라이선스) 참고.
 
 ## 구성
 
@@ -78,3 +80,16 @@ cd viewer-client && npm run electron:dev
 - **Signaling Server**: Rust, tokio, tungstenite, prost (Protobuf), serde_json, argon2
 - **Host Agent**: Rust, xcap, vpx-encode, webrtc-rs 0.11, enigo, cpal, opus, eframe/egui 0.28, sys-locale
 - **Viewer Client**: TypeScript, React 18, Vite, Electron, Zustand, WebRTC API, electron-updater
+
+## 라이선스
+
+[Business Source License 1.1](LICENSE) (BSL) — 소스는 공개되지만 OSI 의미의 "오픈소스"는 아니다.
+
+| 사용 | 허용 여부 |
+|------|-----------|
+| 개인·비상업·평가·개발·내부 테스트 | ✅ 무료 |
+| 소스 열람·수정·재배포 | ✅ 자유 |
+| **상업/프로덕션 사용** (제품·서비스에 사용, 제3자에게 제공 등) | ⚠️ **상업 라이선스 필요** (문의: [github.com/22noH/ERemote](https://github.com/22noH/ERemote)) |
+
+- **Change Date (2030-07-17)** 이후 각 버전은 자동으로 **Apache License 2.0**으로 전환된다.
+- 코드는 공개돼 있어 **직접 자체 호스팅**은 위 조건 내에서 가능하지만, 상업적 이용은 라이선스가 필요하다.
