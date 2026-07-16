@@ -23,7 +23,8 @@ COPY --from=builder /workspace/signaling-server/target/release/signaling-server 
 
 EXPOSE 8080
 
-ENV LISTEN_ADDR=0.0.0.0:8080
+# No hard-coded LISTEN_ADDR: the binary binds $PORT if set (Render/Railway/Fly),
+# else 0.0.0.0:8080 (deploy/ compose reaches it by service name on 8080).
 ENV RUST_LOG=signaling_server=info
 
 # ENTRYPOINT so compose/`docker run` can append flags (e.g. --insecure when TLS
