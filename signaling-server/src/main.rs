@@ -10,9 +10,10 @@ use tracing_subscriber::EnvFilter;
 #[derive(Parser, Debug)]
 #[command(name = "signaling-server", about = "Remote Work Signaling Server")]
 struct Cli {
-    /// Listening address
-    #[arg(long, env = "LISTEN_ADDR", default_value = "0.0.0.0:8080")]
-    listen: String,
+    /// Listening address. If unset, uses $PORT (Render/Railway/Fly/Heroku
+    /// inject it) as 0.0.0.0:$PORT, else 0.0.0.0:8080.
+    #[arg(long, env = "LISTEN_ADDR")]
+    listen: Option<String>,
 
     /// Path to TLS certificate (PEM). If set, enables WSS.
     #[arg(long, env = "TLS_CERT")]
@@ -38,7 +39,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    tracing::info!("Starting signaling server on {}", cli.listen);
+    let listen = cli.listen.clone().unwrap_or_else(default_listen);
+    tracing::info!("Starting signaling server on {}", listen);
 
     let registry = session_registry::SessionRegistry::new();
 
@@ -50,16 +52,26 @@ async fn main() -> anyhow::Result<()> {
             .tls_key
             .ok_or_else(|| anyhow::anyhow!("--tls-key required when TLS is enabled"))?;
         tracing::info!("TLS enabled (cert={}, key={})", cert_path, key_path);
-        ws_server::run_server_tls(cli.listen, registry, cert_path, key_path).await
+        ws_server::run_server_tls(listen, registry, cert_path, key_path).await
     } else if cli.insecure {
         tracing::warn!(
             "TLS disabled (--insecure): viewer passwords travel in CLEARTEXT. Local development only — never production."
         );
-        ws_server::run_server(cli.listen, registry).await
+        ws_server::run_server(listen, registry).await
     } else {
         anyhow::bail!(
             "Refusing to start without TLS — viewer passwords would travel in cleartext. \
              Provide --tls-cert and --tls-key, or pass --insecure for local development."
         );
+    }
+}
+
+/// Managed hosts (Render/Railway/Fly/Heroku) inject the port via $PORT; fall
+/// back to 8080 for local/dev and the deploy/ compose (which reaches it by name).
+// ponytail: $PORT covers the common PaaS; --listen / LISTEN_ADDR overrides anything else.
+fn default_listen() -> String {
+    match std::env::var("PORT") {
+        Ok(p) if !p.trim().is_empty() => format!("0.0.0.0:{}", p.trim()),
+        _ => "0.0.0.0:8080".to_string(),
     }
 }

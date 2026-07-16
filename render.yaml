@@ -1,0 +1,24 @@
+# Render Blueprint — deploys the signaling server as a free web service.
+#
+# Render terminates TLS and gives you an HTTPS/WSS URL (https://<name>.onrender.com).
+# The signaling server runs plaintext WS internally (ALLOW_INSECURE) and binds the
+# port Render injects via $PORT. Point the viewer at wss://<name>.onrender.com.
+#
+# Setup: on render.com -> New -> Blueprint -> connect this repo. Render reads this
+# file and creates the service. Free web services spin down after 15 min idle and
+# cold-start (~30-50s) on the next connection; the host-agent's 30s keepalive keeps
+# it awake while any host is connected.
+services:
+  - type: web
+    name: remotework-signaling
+    runtime: docker
+    plan: free
+    dockerfilePath: ./signaling-server/Dockerfile
+    dockerContext: .
+    autoDeploy: true
+    envVars:
+      # TLS is terminated by Render's edge, so the app itself runs without TLS.
+      - key: ALLOW_INSECURE
+        value: "true"
+      - key: RUST_LOG
+        value: signaling_server=info
