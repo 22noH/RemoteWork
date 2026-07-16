@@ -30,18 +30,67 @@ pub async fn run_server(addr: String, registry: Arc<SessionRegistry>) -> anyhow:
 
     loop {
         let (stream, peer_addr) = listener.accept().await?;
-        tracing::debug!("New connection from {}", peer_addr);
         let registry = registry.clone();
         tokio::spawn(async move {
+            // Distinguish a real WebSocket upgrade from a plain HTTP request
+            // (load-balancer / Render health-check probes). Answer probes with
+            // 200 OK instead of failing the handshake and logging an error.
+            // ponytail: peek the first 1KB — a WS handshake always has its
+            // Sec-WebSocket-Key in there; grow the buffer only if that breaks.
+            let mut peek_buf = [0u8; 1024];
+            let n = match stream.peek(&mut peek_buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => n,
+            };
+            if !is_websocket_upgrade(&peek_buf[..n]) {
+                respond_http_ok(stream).await;
+                return;
+            }
+            tracing::debug!("New connection from {}", peer_addr);
             let ws_stream = match accept_async(stream).await {
                 Ok(ws) => ws,
                 Err(e) => {
-                    tracing::error!("WebSocket handshake failed from {}: {}", peer_addr, e);
+                    tracing::debug!("WebSocket handshake failed from {}: {}", peer_addr, e);
                     return;
                 }
             };
             handle_ws_stream(ws_stream, registry, peer_addr.to_string()).await;
         });
+    }
+}
+
+/// A WebSocket handshake always carries a `Sec-WebSocket-Key` header; plain
+/// HTTP probes (e.g. load-balancer health checks) do not.
+fn is_websocket_upgrade(buf: &[u8]) -> bool {
+    String::from_utf8_lossy(buf)
+        .to_ascii_lowercase()
+        .contains("sec-websocket-key")
+}
+
+/// Reply to a plain HTTP request with a minimal 200 and close, so health-check
+/// probes are not treated as failed WebSocket handshakes.
+async fn respond_http_ok(mut stream: tokio::net::TcpStream) {
+    use tokio::io::AsyncWriteExt;
+    const BODY: &str = "ERemote signaling server\n";
+    let resp = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        BODY.len(),
+        BODY
+    );
+    let _ = stream.write_all(resp.as_bytes()).await;
+    let _ = stream.shutdown().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_websocket_upgrade;
+
+    #[test]
+    fn detects_ws_vs_plain_http() {
+        let ws = b"GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\n\r\n";
+        let health = b"GET / HTTP/1.1\r\nHost: x\r\nUser-Agent: Render/1.0\r\n\r\n";
+        assert!(is_websocket_upgrade(ws));
+        assert!(!is_websocket_upgrade(health));
     }
 }
 
@@ -90,7 +139,7 @@ pub async fn run_server_tls(
             let ws_stream = match accept_async(tls_stream).await {
                 Ok(ws) => ws,
                 Err(e) => {
-                    tracing::error!("WebSocket handshake failed from {}: {}", peer_addr, e);
+                    tracing::debug!("WebSocket handshake failed from {}: {}", peer_addr, e);
                     return;
                 }
             };
