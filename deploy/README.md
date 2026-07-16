@@ -1,4 +1,4 @@
-# Deploying Remote Work
+# Deploying ERemote
 
 One small Linux VPS runs everything: nginx (TLS + the viewer web app), the
 signaling server, automatic Let's Encrypt certificates, and — optionally — a
@@ -68,7 +68,7 @@ Most home-to-home connections work without TURN. Enable it for strict networks
    ```sh
    SIGNALING_URL=wss://DOMAIN/signal \
    TURN_URL=turns:DOMAIN:5349 \
-   TURN_USERNAME=remotework \
+   TURN_USERNAME=eremote \
    TURN_CREDENTIAL=<password> \
    ./host-agent
    ```

@@ -10,7 +10,7 @@
 # it awake while any host is connected.
 services:
   - type: web
-    name: remotework-signaling
+    name: eremote-signaling
     runtime: docker
     plan: free
     dockerfilePath: ./signaling-server/Dockerfile
