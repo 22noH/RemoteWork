@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
-import { SignalingClient } from '../core/signaling'
-import { RemotePeerConnection } from '../core/peer-connection'
+import { connectionManager } from '../core/connection'
 import { useConnectionStore } from '../stores/connection-store'
 
 // Signaling server URL. An explicit build-time VITE_SIGNALING_URL always wins.
@@ -29,8 +28,7 @@ export default function ConnectionDialog() {
   )
   const [turnUsername, setTurnUsername] = useState('')
   const [turnCredential, setTurnCredential] = useState('')
-  const { error, setError, setConnectionState, setHostId: storeSetHostId, setSessionToken } =
-    useConnectionStore()
+  const { error, setError, setConnectionState } = useConnectionStore()
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,44 +38,26 @@ export default function ConnectionDialog() {
     setError(null)
     setConnectionState('connecting')
 
-    try {
-      const signaling = new SignalingClient(SIGNALING_URL)
-      await signaling.connect()
-      setConnectionState('authenticating')
-
-      const viewerSessionId = crypto.randomUUID()
-
-      signaling.onConnectionResponse((accepted, token, errorMsg) => {
-        if (accepted) {
-          setSessionToken(token)
-          storeSetHostId(hostId)
-          setConnectionState('negotiating')
-
-          const iceServers: RTCIceServer[] = [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-          ]
-          if (turnUrl) {
-            iceServers.push({
-              urls: turnUrl,
-              username: turnUsername || undefined,
-              credential: turnCredential || undefined,
-            })
-          }
-          const pc = new RemotePeerConnection(signaling, iceServers)
-          pc.createOffer(token).catch(console.error)
-        } else {
-          setError(errorMsg ?? 'Connection rejected')
-          setConnectionState('error')
-          signaling.disconnect()
-        }
-        setIsConnecting(false)
+    const iceServers: RTCIceServer[] = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ]
+    if (turnUrl) {
+      iceServers.push({
+        urls: turnUrl,
+        username: turnUsername || undefined,
+        credential: turnCredential || undefined,
       })
+    }
 
-      signaling.requestConnect(hostId, password, viewerSessionId)
+    // The manager owns the session for its whole life, including automatic
+    // reconnection after a drop, so credentials survive component unmount.
+    try {
+      await connectionManager.start(hostId, password, SIGNALING_URL, iceServers)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect')
       setConnectionState('error')
+    } finally {
       setIsConnecting(false)
     }
   }

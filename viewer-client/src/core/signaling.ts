@@ -33,7 +33,20 @@ export class SignalingClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
 
+  // When false, the client does not reconnect its own WebSocket; a higher-level
+  // owner (ConnectionManager) re-establishes the whole session instead.
+  private autoReconnect = true
+  private onClosedCb?: () => void
+
   constructor(private serverUrl: string) {}
+
+  setAutoReconnect(v: boolean) {
+    this.autoReconnect = v
+  }
+
+  onClosed(cb: () => void) {
+    this.onClosedCb = cb
+  }
 
   connect(): Promise<void> {
     return this.connectInternal()
@@ -65,6 +78,12 @@ export class SignalingClient {
       this.ws.onclose = () => {
         console.log('[Signaling] Disconnected')
         this.clearPing()
+
+        // Manager-owned: report the close and let it re-establish the session.
+        if (!this.autoReconnect) {
+          this.onClosedCb?.()
+          return
+        }
 
         if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000)
@@ -204,6 +223,8 @@ export class SignalingClient {
 
   disconnect() {
     this.shouldReconnect = false
+    this.autoReconnect = false
+    this.onClosedCb = undefined
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null

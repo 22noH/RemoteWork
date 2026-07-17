@@ -16,7 +16,11 @@ export class RemotePeerConnection {
 
   private onStreamCb?: (stream: MediaStream) => void
 
-  constructor(signaling: SignalingClient, iceServers: RTCIceServer[]) {
+  constructor(
+    signaling: SignalingClient,
+    iceServers: RTCIceServer[],
+    private onConnectionLost?: () => void,
+  ) {
     this.signaling = signaling
     this.pc = new RTCPeerConnection({ iceServers })
     useConnectionStore.getState().setPeerConnection(this.pc)
@@ -36,40 +40,38 @@ export class RemotePeerConnection {
       }
     }
 
-    // Connection state
-    let iceRestartPending = false
+    // Recovery is owned by ConnectionManager: on a real loss we ask it to
+    // re-establish a fresh session. (The host doesn't support in-place ICE
+    // restart, so a clean reconnect is the reliable path.)
+    let lostFired = false
+    const fireLost = () => {
+      if (lostFired) return
+      lostFired = true
+      this.onConnectionLost?.()
+    }
     this.pc.onconnectionstatechange = () => {
       const state = this.pc.connectionState
       console.log('[PeerConnection] State:', state)
       switch (state) {
         case 'connected':
-          iceRestartPending = false
           useConnectionStore.getState().setConnectionState('connected')
           break
         case 'disconnected':
+          // Brief blips self-recover; give a short grace before reconnecting.
           useConnectionStore.getState().setConnectionState('reconnecting')
-          // Wait 5s then attempt ICE restart
           setTimeout(() => {
-            if (this.pc.connectionState === 'disconnected') {
-              this.pc.restartIce()
+            if (
+              this.pc.connectionState === 'disconnected' ||
+              this.pc.connectionState === 'failed'
+            ) {
+              fireLost()
             }
-          }, 5000)
+          }, 6000)
           break
         case 'failed':
-          if (!iceRestartPending) {
-            iceRestartPending = true
-            this.pc.restartIce()
-            setTimeout(() => {
-              if (this.pc.connectionState === 'failed') {
-                this.close()
-                useConnectionStore.getState().setDisconnectReason('timeout')
-                useConnectionStore.getState().setConnectionState('disconnected')
-              }
-            }, 5000)
-          }
+          fireLost()
           break
         case 'closed':
-          useConnectionStore.getState().setConnectionState('disconnected')
           useConnectionStore.getState().setSendInput(null)
           useConnectionStore.getState().setSendMessage(null)
           useConnectionStore.getState().setSendFile(null)

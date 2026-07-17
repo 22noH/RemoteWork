@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { connectionManager } from '../core/connection'
 
 export type ConnectionState =
   | 'disconnected'
@@ -118,6 +119,9 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
   setIdleWarning: (v) => set({ idleWarning: v }),
 
   disconnect: () => {
+    // End the managed session first so it doesn't try to auto-reconnect after
+    // a user- or idle-initiated disconnect.
+    connectionManager.stop()
     const { signalingWs, peerConnection, localAudioTrack } = get()
     localAudioTrack?.stop()
     signalingWs?.close()
