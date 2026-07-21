@@ -1,95 +1,92 @@
+**English** | [한국어](README.ko.md)
+
 # ERemote
 
-TeamViewer와 유사한 소스 공개(source-available) 원격 데스크탑 애플리케이션.
-Rust 호스트 + TypeScript 뷰어 하이브리드 구조로, WebRTC P2P 연결을 통해 실시간 화면 공유와 원격 제어를 제공한다.
+A TeamViewer-style, source-available remote desktop application. A hybrid of a
+Rust host and a TypeScript viewer, delivering real-time screen sharing and
+remote control over a WebRTC P2P connection.
 
-> **라이선스:** [Business Source License 1.1](LICENSE) — **비상업 사용은 무료**, 상업/프로덕션 사용은 별도 상업 라이선스 필요. 2030-07-17부터 Apache 2.0으로 전환. 자세한 건 아래 [라이선스](#라이선스) 참고.
+> **License:** [Business Source License 1.1](LICENSE) — **free for non-commercial
+> use**; commercial/production use requires a separate commercial license.
+> Converts to Apache 2.0 on 2030-07-17. See [License](#license) below.
 
-## 구성
+## Components
 
-| 컴포넌트 | 설명 |
-|----------|------|
-| `signaling-server/` | Rust WebSocket 시그널링 서버 (TLS 필수) |
-| `host-agent/` | Rust 호스트 에이전트 — 화면 캡처, WebRTC, 입력 주입, 오디오, 호스트 GUI (egui) |
-| `viewer-client/` | TypeScript + React + Electron 뷰어 |
-| `proto/` | Protobuf 메시지 정의 |
-| `deploy/` | 자체 배포 패키지 (nginx + TLS + certbot, opt-in TURN) |
+| Component | Description |
+|-----------|-------------|
+| `signaling-server/` | Rust WebSocket signaling server (TLS required) |
+| `host-agent/` | Rust host agent — screen capture, WebRTC, input injection, audio, host GUI (egui) |
+| `viewer-client/` | TypeScript + React + Electron viewer |
+| `proto/` | Protobuf message definitions |
+| `deploy/` | Self-hosting deployment package (nginx + TLS + certbot, opt-in TURN) |
 
-## 빠른 시작
+## Quick start
 
-**전체 설정 및 빌드 방법은 [`docs/04_SETUP_AND_BUILD.md`](docs/04_SETUP_AND_BUILD.md) 를 참고한다.**
+**For full setup and build instructions, see [`docs/04_SETUP_AND_BUILD.md`](docs/04_SETUP_AND_BUILD.md).**
 
 ```bash
-# 1. 시그널링 서버 (로컬 개발은 --insecure 필수, 평문 WS)
+# 1. Signaling server (--insecure is required for local dev — plaintext WS)
 cd signaling-server && cargo run -- --insecure
 
-# 2. 호스트 에이전트 (화면을 공유할 PC)
+# 2. Host agent (the PC whose screen is shared)
 cd host-agent && cargo run
 
-# 3. 뷰어 (원격 접속할 PC)
+# 3. Viewer (the PC connecting remotely)
 cd viewer-client && npm install && npm run dev
 
-# 또는 Electron 앱으로 실행
+# Or run it as the Electron app
 cd viewer-client && npm run electron:dev
 ```
 
-> 프로덕션 배포(nginx + TLS + certbot, 선택적 TURN)는 [`deploy/README.md`](deploy/README.md) 를 참고한다.
+> For production deployment (nginx + TLS + certbot, optional TURN), see
+> [`deploy/README.md`](deploy/README.md).
 
-## 기능
+## Features
 
-- 실시간 화면 공유 (xcap → VP8 → WebRTC)
-- 원격 키보드/마우스 제어
-- 모니터 선택 (뷰어가 볼 모니터 선택, 호스트가 캡처러 재구성)
-- 양방향 오디오 (Opus)
-- 채팅 및 파일 전송
-- 호스트 GUI (egui) — 연결 승인/거부 프롬프트, 뷰 전용 모드 토글, 채팅, 파일 수신 승인, 창 닫으면 작업표시줄로 최소화
-- 일회용 비밀번호 (실행 때마다 재생성, 디스크에 저장 안 함)
-- 1:1 연결 (동시에 뷰어 1명만 허용)
-- 뷰 전용 모드 (allow_control) — 끄면 뷰어는 화면만 보고 입력은 무시
-- TLS 강제 (시그널링 서버는 TLS 인증서 또는 --insecure 없이는 시작 거부)
-- Argon2id 비밀번호 인증
-- 자동 재연결 (지수 백오프)
-- 세션 idle timeout (5분, 경고 포함)
-- Electron 데스크탑 앱 패키징 (Windows/macOS/Linux)
-- 자동 업데이터 (electron-updater)
+- Real-time screen sharing (xcap → VP8 → WebRTC)
+- Remote keyboard/mouse control
+- Monitor selection (viewer picks which monitor to see; host reconfigures the capturer)
+- Two-way audio (Opus)
+- Chat and file transfer
+- Host GUI (egui) — connect approve/deny prompt, view-only toggle, chat, file-receive approval, minimizes to the taskbar on close
+- One-time password (regenerated on every launch, never written to disk)
+- 1:1 connection (only one viewer at a time)
+- View-only mode (`allow_control`) — when off, the viewer sees the screen but input is ignored
+- Enforced TLS (the signaling server refuses to start without a TLS cert or `--insecure`)
+- Argon2id password authentication
+- Automatic reconnect (exponential backoff)
+- Session idle timeout (5 minutes, with a warning)
+- Electron desktop app packaging (Windows/macOS/Linux)
+- Auto-updater (electron-updater)
 
-## 문서
+## Documentation
 
-| 문서 | 내용 |
-|------|------|
-| [`docs/01_PROJECT_OVERVIEW.md`](docs/01_PROJECT_OVERVIEW.md) | 프로젝트 구조 및 기술 스택 상세 |
-| [`docs/02_PHASE_PLAN.md`](docs/02_PHASE_PLAN.md) | Phase 전체 개발 계획 및 현황 |
-| [`docs/03_SUBAGENT_STRATEGY.md`](docs/03_SUBAGENT_STRATEGY.md) | AI 서브에이전트 운용 전략 |
-| [`docs/04_SETUP_AND_BUILD.md`](docs/04_SETUP_AND_BUILD.md) | 개발 환경 설정 및 빌드 가이드 |
-| [`deploy/README.md`](deploy/README.md) | 프로덕션 배포 가이드 (nginx + TLS + certbot, 선택적 TURN) |
+| Document | Contents |
+|----------|----------|
+| [`docs/01_PROJECT_OVERVIEW.md`](docs/01_PROJECT_OVERVIEW.md) | Project structure and tech-stack detail |
+| [`docs/04_SETUP_AND_BUILD.md`](docs/04_SETUP_AND_BUILD.md) | Development setup and build guide |
+| [`deploy/README.md`](deploy/README.md) | Production deployment guide (nginx + TLS + certbot, optional TURN) |
 
-## 개발 현황
+> The docs are written in Korean.
 
-| Phase | 상태 | 내용 |
-|-------|------|------|
-| 1 | ✅ 완료 | Proto 정의, 시그널링 서버, Host/Viewer 스켈레톤 |
-| 2 | ✅ 완료 | WebRTC 화면 공유 (xcap → VP8 → P2P 스트림) |
-| 3 | ✅ 완료 | 원격 입력 제어 (enigo) |
-| 4 | ✅ 완료 | 파일 전송, 채팅, 오디오, 호스트 GUI (egui) |
-| 5 | ✅ 완료 | Argon2id 보안, TURN 릴레이, Electron 패키징, 재연결 |
-| Post | ✅ 완료 | 자동 업데이터, 세션 idle timeout UI, 재연결 UX |
-| 보안·UI 강화 | ✅ 완료 | 일회용 비밀번호, 1:1 연결, 뷰 전용 모드, 모니터 선택, TLS 강제, deploy/ 배포 |
-
-## 기술 스택
+## Tech stack
 
 - **Signaling Server**: Rust, tokio, tungstenite, prost (Protobuf), serde_json, argon2
 - **Host Agent**: Rust, xcap, vpx-encode, webrtc-rs 0.11, enigo, cpal, opus, eframe/egui 0.28, sys-locale
 - **Viewer Client**: TypeScript, React 18, Vite, Electron, Zustand, WebRTC API, electron-updater
 
-## 라이선스
+## License
 
-[Business Source License 1.1](LICENSE) (BSL) — 소스는 공개되지만 OSI 의미의 "오픈소스"는 아니다.
+[Business Source License 1.1](LICENSE) (BSL) — the source is available, but this
+is not "open source" in the OSI sense.
 
-| 사용 | 허용 여부 |
-|------|-----------|
-| 개인·비상업·평가·개발·내부 테스트 | ✅ 무료 |
-| 소스 열람·수정·재배포 | ✅ 자유 |
-| **상업/프로덕션 사용** (제품·서비스에 사용, 제3자에게 제공 등) | ⚠️ **상업 라이선스 필요** (문의: [github.com/22noH/ERemote](https://github.com/22noH/ERemote)) |
+| Use | Allowed |
+|-----|---------|
+| Personal / non-commercial / evaluation / development / internal testing | ✅ Free |
+| Viewing / modifying / redistributing the source | ✅ Free |
+| **Commercial / production use** (in a product or service, offering to third parties, etc.) | ⚠️ **Commercial license required** (inquiries: [github.com/22noH/ERemote](https://github.com/22noH/ERemote)) |
 
-- **Change Date (2030-07-17)** 이후 각 버전은 자동으로 **Apache License 2.0**으로 전환된다.
-- 코드는 공개돼 있어 **직접 자체 호스팅**은 위 조건 내에서 가능하지만, 상업적 이용은 라이선스가 필요하다.
+- After the **Change Date (2030-07-17)**, each version automatically converts to
+  the **Apache License 2.0**.
+- The code is public, so **self-hosting** is allowed within the terms above, but
+  commercial use requires a license.

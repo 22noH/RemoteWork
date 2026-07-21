@@ -38,9 +38,9 @@ ERemote/
 │   │   └── ui.rs                 # 호스트 GUI (egui) — ID/일회용 비밀번호, 뷰 전용 토글, 승인 프롬프트, 채팅
 │   └── crates/
 │       ├── capture/              # 화면 캡처 + VP8 인코딩
-│       ├── input/                # 입력 주입 enigo (Phase 3)
+│       ├── input/                # 입력 주입 (enigo)
 │       ├── network/              # WebSocket 시그널링 + WebRTC
-│       ├── file_transfer/        # 파일 전송 (Phase 4)
+│       ├── file_transfer/        # 파일 전송
 │       ├── audio/                # cpal 마이크 캡처/재생, opus 인코딩/디코딩
 │       ├── auth/                 # Argon2id 해싱 + 자격증명 생성
 │       └── proto/                # prost 코드 생성
@@ -54,9 +54,9 @@ ERemote/
 │       ├── core/
 │       │   ├── signaling.ts      # WebSocket JSON 시그널링 클라이언트
 │       │   ├── peer-connection.ts # RTCPeerConnection 래퍼
-│       │   ├── input-sender.ts   # 입력 이벤트 직렬화 + 전송 (Phase 3)
-│       │   ├── file-transfer.ts  # 파일 전송 (Phase 4)
-│       │   └── chat.ts           # 채팅 (Phase 4)
+│       │   ├── input-sender.ts   # 입력 이벤트 직렬화 + 전송
+│       │   ├── file-transfer.ts  # 파일 전송
+│       │   └── chat.ts           # 채팅
 │       ├── components/
 │       │   ├── ConnectionDialog.tsx
 │       │   ├── RemoteScreen.tsx  # <video> WebRTC 스트림 표시
@@ -89,7 +89,7 @@ ERemote/
 | 직렬화 (뷰어) | serde + serde_json | 1.x | JSON 파싱/생성 |
 | 세션 저장 | dashmap | 5.x | 동시성 안전 HashMap |
 | 세션 ID | uuid | 1.x (v4) | 무작위 세션 토큰 |
-| 인증 (Phase 5) | argon2 | 0.5 | Argon2id 해시 |
+| 인증 | argon2 | 0.5 | Argon2id 해시 |
 | 속도 제한 | 자체 구현 | — | 5회 실패 → 10분 차단 |
 | 로깅 | tracing + tracing-subscriber | 0.1 | 구조화 로그 |
 
@@ -150,7 +150,7 @@ ERemote/
 **빌드 전제조건:** OpenSSL (webrtc-rs 의존성)
 - Windows: `OPENSSL_DIR` 환경변수 설정 또는 rustls feature 사용
 
-#### `input` 크레이트 (Phase 3)
+#### `input` 크레이트
 
 | 항목 | 기술 | 버전 | 용도 |
 |------|------|------|------|
@@ -160,7 +160,7 @@ ERemote/
 
 | 항목 | 기술 | 버전 | 용도 |
 |------|------|------|------|
-| 비밀번호 해시 | argon2 | 0.5 | Argon2id (Phase 5용) |
+| 비밀번호 해시 | argon2 | 0.5 | Argon2id |
 | 난수 | rand | 0.8 | host_id(영구 9자리) / 일회용 비밀번호 생성 |
 
 > **일회용 비밀번호:** 호스트 비밀번호는 실행할 때마다 새로 생성되며 디스크에 저장되지 않는다(serde skip). 세션이 끝나면 유출된 비밀번호는 무용지물이 된다. 따라서 config.json에는 비밀번호 필드가 없다.
@@ -180,7 +180,7 @@ ERemote/
 | 언어 | TypeScript | 5.x | 정적 타입 |
 | UI 프레임워크 | React | 18 | 컴포넌트 기반 UI |
 | 빌드 도구 | Vite | 5.x | 개발 서버 / 번들러 |
-| 데스크탑 셸 | Electron | — | 네이티브 앱 패키징 (Phase 5) |
+| 데스크탑 셸 | Electron | — | 네이티브 앱 패키징 |
 | 상태 관리 | Zustand | — | 전역 연결 상태 |
 | 스타일 | Tailwind CSS | — | 유틸리티 CSS |
 | WebRTC | 브라우저 내장 API | — | `RTCPeerConnection` |
@@ -200,7 +200,7 @@ ERemote/
 
 ---
 
-## 연결 흐름 (Phase 2 기준)
+## 연결 흐름
 
 ```
 Viewer (JSON/WS)          Signaling Server           Host (Protobuf/WS)
@@ -223,6 +223,6 @@ Viewer (JSON/WS)          Signaling Server           Host (Protobuf/WS)
        │                         │                    xcap→I420→VP8→write_sample()
 ```
 
-> Phase 5 이후: 시그널링 연결은 WSS(TLS), 비밀번호는 Argon2id 해시, 재연결은 지수 백오프(최대 10회)
+> 시그널링 연결은 WSS(TLS), 비밀번호는 Argon2id 해시, 재연결은 지수 백오프(최대 10회)로 동작한다.
 >
-> 현재: 연결마다 호스트 GUI 연결 승인(Allow/Deny)을 거치며, 활성 세션이 있으면 두 번째 뷰어는 거절된다(1:1 연결). **뷰 전용 모드**(config `allow_control`, 기본 true; 환경변수 `ALLOW_CONTROL=0/false`로 비활성화)가 꺼지면 입력이 무시된다. **모니터 선택**은 `"control"` DataChannel로 모니터 목록을 전달해 뷰어가 볼 모니터를 고르고, 호스트가 캡처러/인코더를 재구성한다.
+> 연결마다 호스트 GUI 연결 승인(Allow/Deny)을 거치며, 활성 세션이 있으면 두 번째 뷰어는 거절된다(1:1 연결). **뷰 전용 모드**(config `allow_control`, 기본 true; 환경변수 `ALLOW_CONTROL=0/false`로 비활성화)가 꺼지면 입력이 무시된다. **모니터 선택**은 `"control"` DataChannel로 모니터 목록을 전달해 뷰어가 볼 모니터를 고르고, 호스트가 캡처러/인코더를 재구성한다.

@@ -298,10 +298,10 @@ npm run dev
 # 프로덕션 빌드 (브라우저)
 npm run build
 
-# Electron 개발 실행 (Phase 5)
+# Electron 개발 실행
 npm run electron:dev
 
-# Electron 패키지 빌드 (Phase 5)
+# Electron 패키지 빌드
 npm run electron:build
 ```
 
